@@ -80,8 +80,9 @@ ButtonAction ButtonClassifier::onLevel(bool pressed, uint32_t now) {
 float ButtonClassifier::holdProgress(uint32_t now) const {
   if (!pressed_) return 0.f;
   const uint32_t held = now - pressMs_;
+  if (held < HOLD_RING_DELAY_MS) return 0.f;
   if (held >= HOLD_MS) return 1.f;
-  return (float)held / (float)HOLD_MS;
+  return (float)(held - HOLD_RING_DELAY_MS) / (float)(HOLD_MS - HOLD_RING_DELAY_MS);
 }
 
 LoadCommand decideLoad(ButtonAction a, bool connected, bool loaded, bool armed) {

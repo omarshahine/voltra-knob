@@ -13,6 +13,7 @@ constexpr int BURST_DETENTS_5 = 4;    // after this many detents inside the wind
 constexpr int BURST_DETENTS_10 = 11;  // after this many, step 10 lb (snapped to 10s)
 constexpr uint32_t TAP_MAX_MS = 400;
 constexpr uint32_t HOLD_MS = 600;
+constexpr uint32_t HOLD_RING_DELAY_MS = 250;   // ring stays hidden this long so a tap never shows it
 constexpr uint32_t CONTACT_BOUNCE_MS = 30;
 
 class WeightDial {

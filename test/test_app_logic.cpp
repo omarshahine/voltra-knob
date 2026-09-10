@@ -101,7 +101,8 @@ static void testButtonHold() {
   ButtonClassifier b;
   b.onLevel(true, 1000);
   CHECK(b.onLevel(true, 1500) == ButtonAction::None);
-  CHECK(b.holdProgress(1300) > 0.49f && b.holdProgress(1300) < 0.51f);
+  CHECK(b.holdProgress(1200) == 0.f);                                   // inside the tap window: no ring
+  CHECK(b.holdProgress(1425) > 0.49f && b.holdProgress(1425) < 0.51f);  // halfway between 250 and 600 ms
   CHECK(b.onLevel(true, 1600) == ButtonAction::HoldComplete);
   CHECK(b.onLevel(true, 1700) == ButtonAction::None);      // fires once
   CHECK(b.onLevel(false, 1800) == ButtonAction::None);     // release after hold is not a tap
