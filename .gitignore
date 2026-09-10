@@ -1,0 +1,8 @@
+build/
+.build/
+*.bin
+*.elf
+*.map
+node_modules/
+.DS_Store
+WORKLOG.md
