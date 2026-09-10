@@ -84,10 +84,11 @@ float ButtonClassifier::holdProgress(uint32_t now) const {
   return (float)held / (float)HOLD_MS;
 }
 
-LoadCommand decideLoad(ButtonAction a, bool connected, bool loaded) {
+LoadCommand decideLoad(ButtonAction a, bool connected, bool loaded, bool armed) {
   if (!connected) return LoadCommand::None;
-  if (a == ButtonAction::Tap && loaded) return LoadCommand::Unload;
-  if (a == ButtonAction::HoldComplete && !loaded) return LoadCommand::Load;
+  if (a == ButtonAction::Tap && (loaded || armed)) return LoadCommand::Unload;
+  if (a == ButtonAction::Tap) return LoadCommand::Load;
+  if (a == ButtonAction::HoldComplete && !loaded && !armed) return LoadCommand::ArmAutoLoad;
   return LoadCommand::None;
 }
 

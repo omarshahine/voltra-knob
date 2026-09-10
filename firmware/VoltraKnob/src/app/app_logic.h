@@ -56,7 +56,9 @@ class ButtonClassifier {
   uint32_t lastEdgeMs_ = 0;
 };
 
-enum class LoadCommand { None, Load, Unload };
-LoadCommand decideLoad(ButtonAction a, bool connected, bool loaded);
+enum class LoadCommand { None, Load, Unload, ArmAutoLoad };
+// Tap while loaded or armed: unload/cancel (always instant). Tap while idle: load now.
+// Hold while idle: arm auto-load (device engages on the first pull after its countdown).
+LoadCommand decideLoad(ButtonAction a, bool connected, bool loaded, bool armed = false);
 
 }  // namespace app

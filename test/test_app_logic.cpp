@@ -124,12 +124,15 @@ static void testButtonBounce() {
 
 static void testDecideLoad() {
   CHECK(decideLoad(ButtonAction::Tap, true, true) == LoadCommand::Unload);
-  CHECK(decideLoad(ButtonAction::Tap, true, false) == LoadCommand::None);
-  CHECK(decideLoad(ButtonAction::HoldComplete, true, false) == LoadCommand::Load);
+  CHECK(decideLoad(ButtonAction::Tap, true, false, true) == LoadCommand::Unload);      // cancel armed
+  CHECK(decideLoad(ButtonAction::Tap, true, false) == LoadCommand::Load);              // load now
+  CHECK(decideLoad(ButtonAction::HoldComplete, true, false) == LoadCommand::ArmAutoLoad);
   CHECK(decideLoad(ButtonAction::HoldComplete, true, true) == LoadCommand::None);
+  CHECK(decideLoad(ButtonAction::HoldComplete, true, false, true) == LoadCommand::None);
   CHECK(decideLoad(ButtonAction::HoldComplete, false, false) == LoadCommand::None);
   CHECK(decideLoad(ButtonAction::Tap, false, true) == LoadCommand::None);
   CHECK(decideLoad(ButtonAction::HoldCancelled, true, false) == LoadCommand::None);
+  CHECK(decideLoad(ButtonAction::None, true, false) == LoadCommand::None);
 }
 
 MINITEST_MAIN({

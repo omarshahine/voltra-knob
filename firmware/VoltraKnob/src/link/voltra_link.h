@@ -10,7 +10,9 @@ struct DeviceState {
   int weightLbs = -1;      // last device-confirmed weight, -1 unknown
   int mode = -1;
   int battery = -1;
-  bool loaded = false;     // true between a successful GO and STOP/disconnect
+  bool loaded = false;     // device reports motor engaged
+  bool armed = false;      // auto-load armed; device will engage after its countdown / first pull
+  int countdownMs = -1;    // remaining auto-load countdown when known
   int reps = 0;            // from per-rep frames since last load
   uint32_t confirmSeq = 0; // increments on every device weight confirmation
 };
@@ -22,6 +24,7 @@ class VoltraLink {
   bool requestWeight(int lbs);
   bool requestLoad();
   bool requestUnload();
+  bool requestArmAutoLoad();
   void clearPinnedAddress();
 };
 

@@ -16,7 +16,10 @@ static const char *stateText(const vlink::DeviceState &s) {
     case vlink::LinkState::Connecting: return "CONNECTING";
     case vlink::LinkState::Handshaking: return "CONNECTING";
     case vlink::LinkState::AppConnectedSuspect: return "APP CONNECTED?";
-    case vlink::LinkState::Ready: return s.loaded ? "LOADED" : "UNLOADED";
+    case vlink::LinkState::Ready:
+      if (s.loaded) return "LOADED";
+      if (s.armed) return s.countdownMs > 0 ? "AUTO LOADING" : "AUTO ARMED";
+      return "UNLOADED";
   }
   return "";
 }
@@ -59,16 +62,17 @@ void loop() {
   {
     int got = 0;
     while (board::pollRotate(ev)) { ++g_rotates; ++got; if (ready) dial.rotate(ev.direction, ev.ms); }
-    if (got) Serial.printf("[rot] t=%lu got=%d evAge=%lu ms target=%d\n", (unsigned long)now, got, (unsigned long)(now - ev.ms), dial.target());
+    (void)got;
   }
 
   static uint32_t lastButtonPoll = 0;
   if (now - lastButtonPoll >= 10) {
     lastButtonPoll = now;
     const app::ButtonAction a = button.onLevel(board::buttonPressed(), now);
-    switch (app::decideLoad(a, ready, dev.loaded)) {
+    switch (app::decideLoad(a, ready, dev.loaded, dev.armed)) {
       case app::LoadCommand::Load: Serial.println("[app] load requested"); vlink::voltraLink.requestLoad(); break;
       case app::LoadCommand::Unload: Serial.println("[app] unload requested"); vlink::voltraLink.requestUnload(); break;
+      case app::LoadCommand::ArmAutoLoad: Serial.println("[app] arm auto-load requested"); vlink::voltraLink.requestArmAutoLoad(); break;
       default: break;
     }
   }
@@ -82,12 +86,15 @@ void loop() {
   vm.pending = dial.pending();
   vm.capped = dial.capped();
   vm.loaded = dev.loaded;
+  vm.armed = dev.armed;
+  vm.countdownMs = dev.countdownMs;
   vm.connected = ready;
-  vm.holdProgress = ready && !dev.loaded ? button.holdProgress(now) : 0.f;
+  vm.holdProgress = ready && !dev.loaded && !dev.armed ? button.holdProgress(now) : 0.f;
   vm.battery = dev.battery;
   vm.reps = dev.reps;
   vm.stateText = stateText(dev);
   ui::render(vm);
+  ui::tick(now);
   static uint32_t maxTimerMs = 0;
   const uint32_t t0 = millis();
   lv_timer_handler();
@@ -95,7 +102,7 @@ void loop() {
   if (dt > maxTimerMs) maxTimerMs = dt;
 
   static uint32_t lastBeat = 0;
-  if (now - lastBeat >= 2000) {
+  if (now - lastBeat >= 5000) {
     lastBeat = now;
     const board::DebugStats ds = board::debugStats();
     static uint32_t lastEncLoops = 0;
