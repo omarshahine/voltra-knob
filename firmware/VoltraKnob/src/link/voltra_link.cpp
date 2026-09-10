@@ -92,7 +92,11 @@ void onNotify(NimBLERemoteCharacteristic *, uint8_t *data, size_t len, bool) {
       if (e.weightLbs >= 0) { g_state.weightLbs = e.weightLbs; ++g_state.confirmSeq; }
       if (e.mode >= 0) g_state.mode = e.mode;
       if (e.fitnessMode >= 0) applyFitnessMode(e.fitnessMode);
-      if (e.guidedState >= 0 && e.guidedState != g_state.guidedState) { g_state.guidedState = e.guidedState; recomputeLoadState("guided state"); }
+      if (e.guidedState >= 0 && e.guidedState != g_state.guidedState) {
+        // A poll answered after a rep frame already proved engagement is stale; only 11 (re-armed) may lower 14.
+        const bool staleBackstep = g_state.guidedState == GUIDED_LOADED && (e.guidedState == GUIDED_COUNTDOWN || e.guidedState == GUIDED_ENGAGING);
+        if (!staleBackstep) { g_state.guidedState = e.guidedState; recomputeLoadState("guided state"); }
+      }
       if (e.guidedCountdownMs >= 0) g_state.countdownMs = g_state.guidedState == GUIDED_COUNTDOWN ? e.guidedCountdownMs : -1;
       g_handshakeEvent = true;
       break;

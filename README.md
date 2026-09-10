@@ -11,7 +11,7 @@ Plan: `docs/superpowers/plans/2026-09-10-voltra-knob.md`
 2. The knob scans, connects, and identifies itself as "Voltra Knob". Accept the prompt on the Voltra the first time. The screen shows the trainer's current weight, battery, and a blue Bluetooth glyph when ready.
 3. **Turn** to set weight. Slow clicks step 1 lb. A fast spin steps 5 lb and snaps to fives, a sustained fast spin steps 10 lb and snaps to tens. The number updates instantly; the weight is sent to the Voltra a quarter second after you stop turning. Amber ring means waiting for the device to confirm.
 4. **Tap** while unloaded: load now.
-5. **Hold** 0.6 s while unloaded: arm auto-load. The pill turns amber "AUTO ARMED"; the Voltra engages on your first pull. Arming times out after 18 s.
+5. **Hold** 0.6 s while unloaded: arm auto-load. The pill turns amber "AUTO ARMED". When you pull, the Voltra runs a 3 s countdown ("PULL DETECTED"), engages ("ENGAGING"), and the knob turns green "LOADED". Auto-load stays active between sets until you tap; the knob never releases it on its own.
 6. **Tap** while loaded or armed: unload or cancel, always instant.
 7. Loading or unloading from the Voltra itself is reflected on the knob. Reps count while loaded.
 
