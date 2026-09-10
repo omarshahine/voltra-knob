@@ -15,8 +15,13 @@ static bool hexEq(const Frame& f, const char* hex) {
 }
 
 static void testFrames() {
+  CHECK_EQ(authFrameFallback().len, 41u);
+  CHECK(hexEq(authFrameFallback(), "552904c90110000020004f6950686f6e6500000000000000000000000000000084ab1a5f29200172d8"));
   CHECK_EQ(authFrame().len, 41u);
-  CHECK(hexEq(authFrame(), "552904c90110000020004f6950686f6e6500000000000000000000000000000084ab1a5f29200172d8"));
+  CHECK(std::memcmp(authFrame().data, authFrameFallback().data, 11) == 0);      // header + cmd identical
+  CHECK(std::memcmp(authFrame().data + 11, "Voltra Knob", 11) == 0);            // custom name in the name field
+  CHECK(std::memcmp(authFrame().data + 32, authFrameFallback().data + 32, 7) == 0);   // trailer identical
+  CHECK(hexEq(telemetrySubscribeAllFrame(), "551504a9aa10012020001101008351ffffffff35eb"));
   CHECK_EQ(initFrame(0).len, 15u);
   CHECK(hexEq(initFrame(0), "550f0801aad200002000ff00aa0419"));
   CHECK_EQ(initFrame(1).len, 31u);
@@ -100,6 +105,37 @@ static void testDecode() {
   // Vendor summary: 140 bytes, aa 86 7d, repCount u16 at 16.
   n = synth(b, 140, "558c04", {{10,0xaa},{11,0x86},{12,0x7d},{16,9},{17,0}});
   e = decode(b, n); CHECK(e.type == EventType::SetSummary); CHECK_EQ(e.repCount, 9);
+
+  // Settings with fitness mode 893e = 5 (motor engaged) alongside the weight.
+  n = synth(b, 46, "552e04", {{10,0x10},{11,2},{13,0x86},{14,0x3e},{15,0x0a},{16,0x00},{17,0x89},{18,0x3e},{19,0x05},{20,0x00}});
+  e = decode(b, n); CHECK(e.type == EventType::Settings); CHECK_EQ(e.weightLbs, 10); CHECK_EQ(e.fitnessMode, 5);
+  CHECK(fitnessModeLoaded(5)); CHECK(fitnessModeUnloaded(4)); CHECK(!fitnessModeLoaded(4));
+
+  // Mode confirmation carrying 893e reports fitnessMode, not training mode.
+  n = synth(b, 18, "551204", {{13,0x89},{14,0x3e},{15,4}});
+  e = decode(b, n); CHECK(e.type == EventType::ModeConfirmed); CHECK_EQ(e.fitnessMode, 4); CHECK_EQ(e.mode, -1);
+  n = synth(b, 18, "551204", {{13,0xb0},{14,0x4f},{15,1}});
+  e = decode(b, n); CHECK(e.type == EventType::ModeConfirmed); CHECK_EQ(e.mode, 1); CHECK_EQ(e.fitnessMode, -1);
+
+  // cmd 0x0f bulk response: frame type 0x08, count u16 at 12, params from 14.
+  n = synth(b, 30, "551e08", {{10,0x0f},{12,3},{13,0},{14,0x86},{15,0x3e},{16,0x28},{17,0x00},{18,0x89},{19,0x3e},{20,0x04},{21,0x00},{22,0xb0},{23,0x4f},{24,1}});
+  e = decode(b, n); CHECK(e.type == EventType::Settings); CHECK_EQ(e.weightLbs, 40); CHECK_EQ(e.fitnessMode, 4); CHECK_EQ(e.mode, 1);
+
+  // Read-settings request frame: cmd 0x0f, 3 params, valid header length.
+  CHECK_EQ((int)readSettingsFrame().data[10], 0x0f);
+  CHECK_EQ((int)readSettingsFrame().data[1], (int)readSettingsFrame().len);
+  CHECK_EQ((int)readSettingsFrame().data[11], 3);
+
+  // Guided-load status in a cmd 0x0f response: safety 538d=0, state 53c7=1, countdown 53c8=2500 ms, ctrl 53c9=1.
+  n = synth(b, 30, "551e08", {{10,0x0f},{12,4},{13,0},{14,0x8d},{15,0x53},{16,0},{17,0xc7},{18,0x53},{19,1},{20,0xc8},{21,0x53},{22,0xc4},{23,0x09},{24,0xc9},{25,0x53},{26,1}});
+  e = decode(b, n); CHECK(e.type == EventType::Settings); CHECK_EQ(e.guidedCountdownMs, 2500); CHECK_EQ(e.guidedSafety, 0);
+  // Fitness mode 0x26 = armed, not unloaded.
+  CHECK(fitnessModeArmed(0x26)); CHECK(!fitnessModeUnloaded(0x26)); CHECK(!fitnessModeLoaded(0x26));
+  // Trigger frame: vendor cmd 0xaa, sub-command 0x12, 14 bytes with valid length byte.
+  CHECK_EQ(guidedLoadTriggerFrame().len, 14u);
+  CHECK_EQ((int)guidedLoadTriggerFrame().data[10], 0xaa); CHECK_EQ((int)guidedLoadTriggerFrame().data[11], 0x12);
+  CHECK_EQ((int)guidedLoadTriggerFrame().data[1], 14);
+  CHECK_EQ((int)readGuidedLoadStatusFrame().data[11], 4);
 
   // Garbage and short input.
   uint8_t junk[3] = {1, 2, 3};

@@ -9,12 +9,23 @@ void WeightDial::setConfirmed(int lbs, uint32_t /*now*/) {
   capped_ = false;
 }
 
+namespace {
+// Move from `from` to the next multiple of `step` in `direction`.
+int snapStep(int from, int step, int direction) {
+  if (step == 1) return from + direction;
+  if (direction > 0) return (from / step + 1) * step;
+  return from % step == 0 ? from - step : (from / step) * step;
+}
+}  // namespace
+
 void WeightDial::rotate(int direction, uint32_t now) {
   if (now - lastDetentMs_ > BURST_WINDOW_MS) burstCount_ = 0;
   lastDetentMs_ = now;
   ++burstCount_;
-  const int step = burstCount_ > BURST_DETENTS ? BURST_STEP : 1;
-  int next = target_ + (direction > 0 ? step : -step);
+  int step = 1;
+  if (burstCount_ > BURST_DETENTS_10) step = 10;
+  else if (burstCount_ > BURST_DETENTS_5) step = 5;
+  int next = snapStep(target_, step, direction > 0 ? 1 : -1);
   if (next < WEIGHT_MIN) next = WEIGHT_MIN;
   if (next > WEIGHT_MAX) next = WEIGHT_MAX;
   capped_ = false;

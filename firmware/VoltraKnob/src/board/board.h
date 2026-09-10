@@ -10,7 +10,7 @@ bool pollRotate(RotateEvent& out);  // non-blocking; drains the encoder queue on
 bool buttonPressed();               // PCF8574 P5, active low; true while pressed
 void setBacklight(uint8_t level);   // 0..255
 
-struct DebugStats { uint32_t encLoops, encEdges, levelA, levelB, encStackFree, queueWaiting; };
+struct DebugStats { uint32_t encLoops, encEdges, levelA, levelB, encStackFree, queueWaiting; int arduinoA, arduinoB, rawA, rawB; uint32_t flushes, flushPixels, flushMaxUs; uint32_t edgesA, edgesB; };
 DebugStats debugStats();           // encoder task health counters
 void dumpEncoderPins();            // print GPIO config of the encoder pins
 

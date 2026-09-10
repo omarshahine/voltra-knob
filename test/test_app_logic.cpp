@@ -28,20 +28,46 @@ static void testDialClamp() {
 
 static void testDialBurst() {
   WeightDial d; d.setConfirmed(50, 0);
-  for (int i = 0; i < 4; ++i) d.rotate(+1, 10 + i * 20);   // 4 detents in 60 ms -> still 1 lb each
+  uint32_t t = 10;
+  for (int i = 0; i < 4; ++i) { d.rotate(+1, t); t += 20; }   // detents 1-4: 1 lb each
   CHECK_EQ(d.target(), 54);
-  d.rotate(+1, 100);                                        // 5th detent inside the burst: 5 lb
-  CHECK_EQ(d.target(), 59);
-  d.rotate(+1, 400);                                        // 300 ms gap ends the burst
+  d.rotate(+1, t); t += 20;                                   // detent 5: step 5, snap up to 55
+  CHECK_EQ(d.target(), 55);
+  d.rotate(+1, t); t += 20;                                   // 60
   CHECK_EQ(d.target(), 60);
+  for (int i = 0; i < 5; ++i) { d.rotate(+1, t); t += 20; }  // detents 7-11: 65..85
+  CHECK_EQ(d.target(), 85);
+  d.rotate(+1, t); t += 20;                                   // detent 12: step 10, snap up to 90
+  CHECK_EQ(d.target(), 90);
+  d.rotate(+1, t); t += 20;                                   // 100
+  CHECK_EQ(d.target(), 100);
+  d.rotate(+1, t + 400);                                      // gap ends the burst: back to 1 lb
+  CHECK_EQ(d.target(), 101);
+}
+
+static void testDialBurstDown() {
+  WeightDial d; d.setConfirmed(103, 0);
+  uint32_t t = 10;
+  for (int i = 0; i < 4; ++i) { d.rotate(-1, t); t += 20; }   // 99
+  CHECK_EQ(d.target(), 99);
+  d.rotate(-1, t); t += 20;                                   // step 5, snap down to 95
+  CHECK_EQ(d.target(), 95);
+  d.rotate(-1, t); t += 20;                                   // 90
+  CHECK_EQ(d.target(), 90);
+  for (int i = 0; i < 5; ++i) { d.rotate(-1, t); t += 20; }  // 65
+  CHECK_EQ(d.target(), 65);
+  d.rotate(-1, t); t += 20;                                   // step 10, snap down to 60
+  CHECK_EQ(d.target(), 60);
+  d.rotate(-1, t); t += 20;                                   // 50
+  CHECK_EQ(d.target(), 50);
 }
 
 static void testDialTimeoutReverts() {
   WeightDial d; d.setConfirmed(50, 0);
   d.rotate(+1, 10);
   int lbs; CHECK(d.pollSend(300, lbs));
-  CHECK(!d.pollTimeout(2000));
-  CHECK(d.pollTimeout(2301));
+  CHECK(!d.pollTimeout(3000));
+  CHECK(d.pollTimeout(3301));
   CHECK_EQ(d.target(), 50); CHECK(!d.pending());
   CHECK(!d.pollTimeout(2400));
 }
@@ -107,7 +133,7 @@ static void testDecideLoad() {
 }
 
 MINITEST_MAIN({
-  testDialBasics(); testDialClamp(); testDialBurst(); testDialTimeoutReverts();
+  testDialBasics(); testDialClamp(); testDialBurst(); testDialBurstDown(); testDialTimeoutReverts();
   testDialLoadedCap(); testDialConfirmedWhileIdleFollowsDevice();
   testButtonTap(); testButtonHold(); testButtonHoldCancelled(); testButtonBounce(); testDecideLoad();
 })

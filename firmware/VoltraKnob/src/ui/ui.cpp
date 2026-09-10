@@ -162,6 +162,14 @@ void begin() {
   lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, 22, 76);
 }
 
+namespace {
+uint32_t lastArcColor = 0xFFFFFFFF;
+lv_opa_t lastGlowOpa = 0;
+int lastHold = -1;
+bool lastConnectedStyle = false;
+uint32_t lastPillColor = 0xFFFFFFFF;
+}  // namespace
+
 void render(const ViewModel& vm) {
   if (!first && vm.weight == last.weight && vm.pending == last.pending && vm.capped == last.capped &&
       vm.loaded == last.loaded && vm.connected == last.connected && vm.battery == last.battery &&
@@ -169,43 +177,68 @@ void render(const ViewModel& vm) {
       std::strcmp(vm.stateText, last.stateText) == 0) {
     return;
   }
-  const bool weightChanged = first || vm.weight != last.weight;
+  const bool isFirst = first;
+  const ViewModel prev = last;
   first = false;
   last = vm;
 
-  if (weightChanged) {
-    animateArc(weightArc, animatedWeight, vm.weight, 180);
+  // Weight arc: only the changed sector is invalidated by LVGL, so keep the animation short.
+  if (isFirst || vm.weight != prev.weight) {
+    lv_arc_set_value(weightArc, vm.weight);
+    lv_arc_set_value(glowArc, vm.weight);
     animatedWeight = vm.weight;
+    lv_label_set_text_fmt(weightLabel, "%d", vm.weight);
+    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -26);
   }
+
+  // Style writes invalidate the whole object, so apply them only on actual change.
   uint32_t arcColor = GREY;
   if (vm.loaded) arcColor = GREEN;
   if (vm.pending || vm.capped) arcColor = AMBER;
-  lv_obj_set_style_arc_color(weightArc, lv_color_hex(arcColor), LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(glowArc, lv_color_hex(arcColor), LV_PART_INDICATOR);
-  lv_obj_set_style_arc_opa(glowArc, vm.loaded ? LV_OPA_50 : LV_OPA_20, LV_PART_INDICATOR);
+  if (arcColor != lastArcColor) {
+    lastArcColor = arcColor;
+    lv_obj_set_style_arc_color(weightArc, lv_color_hex(arcColor), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(glowArc, lv_color_hex(arcColor), LV_PART_INDICATOR);
+  }
+  const lv_opa_t glowOpa = vm.loaded ? LV_OPA_50 : LV_OPA_20;
+  if (glowOpa != lastGlowOpa) {
+    lastGlowOpa = glowOpa;
+    lv_obj_set_style_arc_opa(glowArc, glowOpa, LV_PART_INDICATOR);
+  }
 
-  lv_arc_set_value(holdArc, (int)(vm.holdProgress * 100.f));
+  const int hold = (int)(vm.holdProgress * 100.f);
+  if (hold != lastHold) { lastHold = hold; lv_arc_set_value(holdArc, hold); }
 
-  lv_label_set_text_fmt(weightLabel, "%d", vm.weight);
-  lv_obj_set_style_text_color(weightLabel, vm.connected ? lv_color_white() : lv_color_hex(GREY), 0);
-  lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -26);
+  if (isFirst || vm.connected != lastConnectedStyle) {
+    lastConnectedStyle = vm.connected;
+    lv_obj_set_style_text_color(weightLabel, vm.connected ? lv_color_white() : lv_color_hex(GREY), 0);
+    lv_obj_set_style_text_color(bleLabel, lv_color_hex(vm.connected ? BLUE : GREY), 0);
+  }
 
   uint32_t pillColor = TRACK;
   if (vm.connected && vm.loaded) pillColor = GREEN;
   else if (vm.connected) pillColor = 0x2A3446;
-  lv_obj_set_style_bg_color(statePill, lv_color_hex(pillColor), 0);
-  lv_obj_set_style_text_color(stateLabel, vm.loaded ? lv_color_hex(0x06261A) : lv_color_white(), 0);
-  lv_label_set_text(stateLabel, vm.stateText);
-  lv_obj_center(stateLabel);
+  if (pillColor != lastPillColor) {
+    lastPillColor = pillColor;
+    lv_obj_set_style_bg_color(statePill, lv_color_hex(pillColor), 0);
+    lv_obj_set_style_text_color(stateLabel, vm.loaded ? lv_color_hex(0x06261A) : lv_color_white(), 0);
+  }
+  if (isFirst || std::strcmp(vm.stateText, prev.stateText) != 0) {
+    lv_label_set_text(stateLabel, vm.stateText);
+    lv_obj_center(stateLabel);
+  }
 
-  if (vm.loaded) lv_label_set_text_fmt(repsLabel, "%d reps", vm.reps);
-  else lv_label_set_text(repsLabel, "");
-  lv_obj_align(repsLabel, LV_ALIGN_BOTTOM_MID, 0, -58);
+  if (isFirst || vm.loaded != prev.loaded || vm.reps != prev.reps) {
+    if (vm.loaded) lv_label_set_text_fmt(repsLabel, "%d reps", vm.reps);
+    else lv_label_set_text(repsLabel, "");
+    lv_obj_align(repsLabel, LV_ALIGN_BOTTOM_MID, 0, -58);
+  }
 
-  lv_obj_set_style_text_color(bleLabel, lv_color_hex(vm.connected ? BLUE : GREY), 0);
-  if (vm.battery >= 0) lv_label_set_text_fmt(batteryLabel, "%s %d%%", batterySymbol(vm.battery), vm.battery);
-  else lv_label_set_text(batteryLabel, "");
-  lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, 22, 76);
+  if (isFirst || vm.battery != prev.battery) {
+    if (vm.battery >= 0) lv_label_set_text_fmt(batteryLabel, "%s %d%%", batterySymbol(vm.battery), vm.battery);
+    else lv_label_set_text(batteryLabel, "");
+    lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, 22, 76);
+  }
 }
 
 }  // namespace ui

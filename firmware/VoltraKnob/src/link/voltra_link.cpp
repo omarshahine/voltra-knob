@@ -11,7 +11,7 @@ VoltraLink voltraLink;
 
 namespace {
 
-enum class CmdType : uint8_t { Weight, Load, Unload };
+enum class CmdType : uint8_t { Load, Unload };
 struct Cmd { CmdType type; int lbs; };
 
 constexpr uint32_t AUTH_WAIT_MS = 3000;
@@ -38,11 +38,19 @@ volatile bool g_handshakeEvent = false;
 int g_consecutiveFailures = 0;
 uint32_t g_lastWriteMs = 0;
 String g_pinned;   // pinned device address read from NVS at the start of each scan
+bool g_useFallbackAuth = false;   // switch to the SDK iPhone identity if the custom name is rejected
+volatile int g_pendingWeight = -1;   // latest dial target not yet written; coalesces bursts into one frame
 
 void setState(void (*fn)(DeviceState&)) {
   xSemaphoreTake(g_mutex, portMAX_DELAY);
   fn(g_state);
   xSemaphoreGive(g_mutex);
+}
+
+// Device-reported motor state (893e). Called with the state mutex held.
+void applyFitnessMode(int fm) {
+  if (voltra::fitnessModeLoaded(fm) && !g_state.loaded) { g_state.loaded = true; g_state.reps = 0; Serial.printf("[link] device reports loaded (fm=%d)\n", fm); }
+  else if (voltra::fitnessModeUnloaded(fm) && g_state.loaded) { g_state.loaded = false; Serial.printf("[link] device reports unloaded (fm=%d)\n", fm); }
 }
 
 void onNotify(NimBLERemoteCharacteristic *, uint8_t *data, size_t len, bool) {
@@ -53,14 +61,22 @@ void onNotify(NimBLERemoteCharacteristic *, uint8_t *data, size_t len, bool) {
     case voltra::EventType::Settings:
       if (e.weightLbs >= 0) { g_state.weightLbs = e.weightLbs; ++g_state.confirmSeq; }
       if (e.mode >= 0) g_state.mode = e.mode;
+      if (e.fitnessMode >= 0) applyFitnessMode(e.fitnessMode);
       g_handshakeEvent = true;
       break;
     case voltra::EventType::ModeConfirmed:
-      g_state.mode = e.mode;
+      if (e.mode >= 0) g_state.mode = e.mode;
+      if (e.fitnessMode >= 0) applyFitnessMode(e.fitnessMode);
       g_handshakeEvent = true;
       break;
     case voltra::EventType::Battery:
-      g_state.battery = e.battery;
+      if (e.battery >= 0 && e.battery <= 100) {
+        g_state.battery = e.battery;
+      } else {
+        Serial.printf("[link] odd battery frame (%d) len=%u:", e.battery, (unsigned)len);
+        for (size_t i = 0; i < len && i < 24; ++i) Serial.printf(" %02x", data[i]);
+        Serial.println();
+      }
       break;
     case voltra::EventType::PerRep:
       if (e.repCount >= 0) g_state.reps = e.repCount;
@@ -132,7 +148,9 @@ bool connectAndHandshake() {
   if (!notify->subscribe(true, onNotify)) { Serial.println("[link] subscribe failed"); g_client->disconnect(); return false; }
 
   setState([](DeviceState &s) { s.link = LinkState::Handshaking; });
-  if (!writeRaw(voltra::authFrame())) { Serial.println("[link] auth write failed"); g_client->disconnect(); return false; }
+  const voltra::Frame auth = g_useFallbackAuth ? voltra::authFrameFallback() : voltra::authFrame();
+  Serial.printf("[link] auth as %s\n", g_useFallbackAuth ? "iPhone (fallback)" : voltra::frames::AUTH_KNOB_NAME);
+  if (!writeRaw(auth)) { Serial.println("[link] auth write failed"); g_client->disconnect(); return false; }
   vTaskDelay(pdMS_TO_TICKS(AUTH_WAIT_MS));
   for (size_t i = 0; i < voltra::INIT_COUNT; ++i) {
     if (!writeRaw(voltra::initFrame(i))) { Serial.println("[link] init write failed"); g_client->disconnect(); return false; }
@@ -142,7 +160,14 @@ bool connectAndHandshake() {
 
   const uint32_t deadline = millis() + HANDSHAKE_DEADLINE_MS;
   while (millis() < deadline && !g_handshakeEvent && !g_disconnected) vTaskDelay(pdMS_TO_TICKS(50));
-  if (!g_handshakeEvent) { Serial.println("[link] handshake timeout"); g_client->disconnect(); return false; }
+  if (!g_handshakeEvent) {
+    Serial.println("[link] handshake timeout");
+    if (!g_useFallbackAuth) { g_useFallbackAuth = true; Serial.println("[link] will retry with the iPhone identity"); }
+    g_client->disconnect();
+    return false;
+  }
+  if (!writeFrame(voltra::telemetrySubscribeAllFrame())) Serial.println("[link] telemetry subscribe failed (continuing)");
+  if (!writeFrame(voltra::readSettingsFrame())) Serial.println("[link] settings read failed (continuing)");
 
   g_prefs.begin("voltra", false);
   g_prefs.putString("addr", g_targetAddr.toString().c_str());
@@ -155,17 +180,18 @@ bool connectAndHandshake() {
 void servicePump() {
   Cmd cmd;
   while (!g_disconnected && g_client && g_client->isConnected()) {
-    if (xQueueReceive(g_cmdQueue, &cmd, pdMS_TO_TICKS(50)) != pdTRUE) continue;
-    switch (cmd.type) {
-      case CmdType::Weight: {
-        voltra::Frame f;
-        if (voltra::weightFrame(cmd.lbs, f)) {
-          const bool ok = writeFrame(f);
-          Serial.printf("[link] set weight %d -> %s\n", cmd.lbs, ok ? "ok" : "FAIL");
-          if (!ok) g_disconnected = true;
-        }
-        break;
+    const int lbs = g_pendingWeight;
+    if (lbs >= 0) {
+      g_pendingWeight = -1;   // a newer target arriving during the write is picked up next round
+      voltra::Frame f;
+      if (voltra::weightFrame(lbs, f)) {
+        const bool ok = writeFrame(f);
+        Serial.printf("[link] set weight %d -> %s\n", lbs, ok ? "ok" : "FAIL");
+        if (!ok) { g_disconnected = true; continue; }
       }
+    }
+    if (xQueueReceive(g_cmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) continue;
+    switch (cmd.type) {
       case CmdType::Load: {
         bool ok = writeFrame(voltra::setupFrame());
         if (ok) { vTaskDelay(pdMS_TO_TICKS(LOAD_SETUP_GAP_MS)); ok = writeRaw(voltra::goFrame()); }
@@ -213,6 +239,7 @@ void linkTask(void *) {
     }
     setState([](DeviceState &s) { s.loaded = false; s.link = LinkState::Scanning; });
     xQueueReset(g_cmdQueue);
+    g_pendingWeight = -1;
     Serial.printf("[link] retry in %u ms\n", (unsigned)backoffMs);
     vTaskDelay(pdMS_TO_TICKS(backoffMs));
     backoffMs = backoffMs >= 8000 ? 8000 : backoffMs * 2;
@@ -238,8 +265,8 @@ DeviceState VoltraLink::state() {
 }
 
 bool VoltraLink::requestWeight(int lbs) {
-  Cmd c{CmdType::Weight, lbs};
-  return xQueueSend(g_cmdQueue, &c, 0) == pdTRUE;
+  g_pendingWeight = lbs;
+  return true;
 }
 
 bool VoltraLink::requestLoad() {

@@ -6,6 +6,7 @@
 #include <Adafruit_CST8XX.h>
 #include "PCF8574.h"
 #include "driver/gpio.h"
+#include "esp_intr_alloc.h"
 
 namespace board {
 namespace {
@@ -17,7 +18,7 @@ constexpr int ENCODER_B_PIN = 4;
 constexpr int SCREEN_BACKLIGHT_PIN = 6;
 constexpr uint8_t I2C_TOUCH_ADDR = 0x15;
 // Set to 1 if clockwise rotation lowers the weight on the bench.
-constexpr int ENCODER_INVERT = 0;
+constexpr int ENCODER_INVERT = 1;
 
 PCF8574 pcf8574(0x21);
 Adafruit_CST8XX touch;
@@ -41,16 +42,21 @@ uint8_t *buf2 = nullptr;
 QueueHandle_t rotateQueue = nullptr;
 TaskHandle_t encoderTaskHandle = nullptr;
 volatile uint32_t g_encLoops = 0, g_encEdges = 0, g_encLevelA = 0, g_encLevelB = 0;
+volatile uint32_t g_flushes = 0, g_flushPixels = 0, g_flushMaxUs = 0;
 
 void dispFlush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map) {
   const uint32_t w = area->x2 - area->x1 + 1;
   const uint32_t h = area->y2 - area->y1 + 1;
+  const uint32_t tStart = micros();
+  ++g_flushes; g_flushPixels += w * h;
   uint16_t *pixels = (uint16_t *)px_map;
   for (uint32_t i = 0; i < w * h; ++i) {
     const uint16_t c = pixels[i];
     pixels[i] = (c & 0x07E0) | ((c & 0x001F) << 11) | ((c & 0xF800) >> 11);
   }
   gfx->draw16bitRGBBitmap(area->x1, area->y1, pixels, w, h);
+  const uint32_t dt = micros() - tStart;
+  if (dt > g_flushMaxUs) g_flushMaxUs = dt;
   lv_display_flush_ready(display);
 }
 
@@ -65,21 +71,37 @@ void touchRead(lv_indev_t *, lv_indev_data_t *data) {
   }
 }
 
+// Full quadrature decoding: every A or B transition contributes +1/-1 from a Gray-code table,
+// which is immune to contact bounce (a bounce adds +1 then -1). One detent on this encoder is
+// two transitions; ENCODER_COUNTS_PER_DETENT converts accumulated counts to steps.
+constexpr int ENCODER_COUNTS_PER_DETENT = 2;
+volatile uint32_t g_edgesA = 0, g_edgesB = 0;
+
 void encoderTask(void *) {
-  int previousA = digitalRead(ENCODER_A_PIN);
+  static const int8_t table[16] = {0, -1, +1, 0, +1, 0, 0, -1, -1, 0, 0, +1, 0, +1, -1, 0};
+  uint8_t prev = (gpio_get_level((gpio_num_t)ENCODER_A_PIN) << 1) | gpio_get_level((gpio_num_t)ENCODER_B_PIN);
+  int accum = 0;
   while (true) {
-    const int a = digitalRead(ENCODER_A_PIN);
-    ++g_encLoops; g_encLevelA = a; g_encLevelB = digitalRead(ENCODER_B_PIN);
-    if (a != previousA) ++g_encEdges;
-    if (a != previousA && a == HIGH) {
-      RotateEvent ev;
-      const bool ccw = digitalRead(ENCODER_B_PIN) != a;
-      ev.direction = (ccw ^ (ENCODER_INVERT != 0)) ? -1 : +1;
-      ev.ms = millis();
-      xQueueSend(rotateQueue, &ev, 0);
+    const int a = gpio_get_level((gpio_num_t)ENCODER_A_PIN);
+    const int bLevel = gpio_get_level((gpio_num_t)ENCODER_B_PIN);
+    ++g_encLoops; g_encLevelA = a; g_encLevelB = bLevel;
+    const uint8_t cur = (a << 1) | bLevel;
+    if (cur != prev) {
+      if ((cur >> 1) != (prev >> 1)) ++g_edgesA;
+      if ((cur & 1) != (prev & 1)) ++g_edgesB;
+      ++g_encEdges;
+      accum += table[(prev << 2) | cur];
+      prev = cur;
+      if (accum >= ENCODER_COUNTS_PER_DETENT || accum <= -ENCODER_COUNTS_PER_DETENT) {
+        RotateEvent ev;
+        const bool cw = accum > 0;
+        accum = 0;
+        ev.direction = (cw ^ (ENCODER_INVERT != 0)) ? +1 : -1;
+        ev.ms = millis();
+        xQueueSend(rotateQueue, &ev, 0);
+      }
     }
-    previousA = a;
-    vTaskDelay(pdMS_TO_TICKS(2));
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
 
@@ -114,8 +136,8 @@ bool begin() {
 
   Serial.println(touch.begin(&Wire, I2C_TOUCH_ADDR) ? "[board] touch ok" : "[board] touch missing");
 
-  pinMode(ENCODER_A_PIN, INPUT);
-  pinMode(ENCODER_B_PIN, INPUT);
+  pinMode(ENCODER_A_PIN, INPUT_PULLUP);
+  pinMode(ENCODER_B_PIN, INPUT_PULLUP);
 
   lv_init();
   lv_tick_set_cb(millis);
@@ -134,7 +156,7 @@ bool begin() {
   lv_indev_set_display(indev, display);
 
   rotateQueue = xQueueCreate(32, sizeof(RotateEvent));
-  xTaskCreatePinnedToCore(encoderTask, "ENC", 4096, nullptr, 1, &encoderTaskHandle, 0);
+  xTaskCreatePinnedToCore(encoderTask, "ENC", 4096, nullptr, 3, &encoderTaskHandle, 1);   // loop core, above loop priority
 
   delay(200);
   ledcAttach(SCREEN_BACKLIGHT_PIN, 5000, 8);
@@ -156,14 +178,20 @@ void dumpEncoderPins() {
   Serial.printf("[gpio] uptime=%lu ms\n", (unsigned long)millis());
   Serial.flush();
   gpio_dump_io_configuration(stdout, (1ULL << ENCODER_A_PIN) | (1ULL << ENCODER_B_PIN));
+  esp_intr_dump(stdout);
   fflush(stdout);
 }
 
 DebugStats debugStats() {
   DebugStats d;
+  d.arduinoA = digitalRead(ENCODER_A_PIN); d.arduinoB = digitalRead(ENCODER_B_PIN);
+  d.rawA = gpio_get_level((gpio_num_t)ENCODER_A_PIN); d.rawB = gpio_get_level((gpio_num_t)ENCODER_B_PIN);
   d.encLoops = g_encLoops; d.encEdges = g_encEdges; d.levelA = g_encLevelA; d.levelB = g_encLevelB;
   d.encStackFree = encoderTaskHandle ? uxTaskGetStackHighWaterMark(encoderTaskHandle) : 0;
   d.queueWaiting = rotateQueue ? uxQueueMessagesWaiting(rotateQueue) : 0;
+  d.edgesA = g_edgesA; d.edgesB = g_edgesB;
+  d.flushes = g_flushes; d.flushPixels = g_flushPixels; d.flushMaxUs = g_flushMaxUs;
+  g_flushes = 0; g_flushPixels = 0; g_flushMaxUs = 0;
   return d;
 }
 
