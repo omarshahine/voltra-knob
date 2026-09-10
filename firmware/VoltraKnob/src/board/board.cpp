@@ -5,6 +5,7 @@
 #include <Arduino_GFX_Library.h>
 #include <Adafruit_CST8XX.h>
 #include "PCF8574.h"
+#include "driver/gpio.h"
 
 namespace board {
 namespace {
@@ -38,6 +39,8 @@ Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
 uint8_t *buf1 = nullptr;
 uint8_t *buf2 = nullptr;
 QueueHandle_t rotateQueue = nullptr;
+TaskHandle_t encoderTaskHandle = nullptr;
+volatile uint32_t g_encLoops = 0, g_encEdges = 0, g_encLevelA = 0, g_encLevelB = 0;
 
 void dispFlush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map) {
   const uint32_t w = area->x2 - area->x1 + 1;
@@ -66,6 +69,8 @@ void encoderTask(void *) {
   int previousA = digitalRead(ENCODER_A_PIN);
   while (true) {
     const int a = digitalRead(ENCODER_A_PIN);
+    ++g_encLoops; g_encLevelA = a; g_encLevelB = digitalRead(ENCODER_B_PIN);
+    if (a != previousA) ++g_encEdges;
     if (a != previousA && a == HIGH) {
       RotateEvent ev;
       const bool ccw = digitalRead(ENCODER_B_PIN) != a;
@@ -82,6 +87,7 @@ void encoderTask(void *) {
 
 bool begin() {
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setTimeOut(50);
   pcf8574.pinMode(P0, OUTPUT);
   pcf8574.pinMode(P2, OUTPUT);
   pcf8574.pinMode(P3, OUTPUT);
@@ -128,7 +134,7 @@ bool begin() {
   lv_indev_set_display(indev, display);
 
   rotateQueue = xQueueCreate(32, sizeof(RotateEvent));
-  xTaskCreatePinnedToCore(encoderTask, "ENC", 2048, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(encoderTask, "ENC", 4096, nullptr, 1, &encoderTaskHandle, 0);
 
   delay(200);
   ledcAttach(SCREEN_BACKLIGHT_PIN, 5000, 8);
@@ -144,6 +150,21 @@ bool pollRotate(RotateEvent& out) {
 
 bool buttonPressed() {
   return pcf8574.digitalRead(P5, true) == LOW;
+}
+
+void dumpEncoderPins() {
+  Serial.printf("[gpio] uptime=%lu ms\n", (unsigned long)millis());
+  Serial.flush();
+  gpio_dump_io_configuration(stdout, (1ULL << ENCODER_A_PIN) | (1ULL << ENCODER_B_PIN));
+  fflush(stdout);
+}
+
+DebugStats debugStats() {
+  DebugStats d;
+  d.encLoops = g_encLoops; d.encEdges = g_encEdges; d.levelA = g_encLevelA; d.levelB = g_encLevelB;
+  d.encStackFree = encoderTaskHandle ? uxTaskGetStackHighWaterMark(encoderTaskHandle) : 0;
+  d.queueWaiting = rotateQueue ? uxQueueMessagesWaiting(rotateQueue) : 0;
+  return d;
 }
 
 void setBacklight(uint8_t level) {
