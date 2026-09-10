@@ -21,7 +21,7 @@ Everything below was verified on real hardware against a VOLTRA I.
 
 ## Hardware
 
-Built and tested on the **Elecrow CrowPanel 2.1" HMI ESP32 Rotary Display**, sold on Amazon under the GrowCube name as "ESP32 Rotary Display 2.1 Inch HMI IPS Round Knob Touch Display" (ASIN B0GVYV3HZN).
+Built and tested on the **Elecrow CrowPanel 2.1" HMI ESP32 Rotary Display**, sold on Amazon under the GrowCube name as "ESP32 Rotary Display 2.1 Inch HMI IPS Round Knob Touch Display". This is the exact unit used: [Amazon link](https://amzn.to/3UJtFTg) (affiliate link).
 
 | Part | Detail |
 | --- | --- |
