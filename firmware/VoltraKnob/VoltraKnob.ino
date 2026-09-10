@@ -39,8 +39,6 @@ void setup() {
   bool held = true;
   while (millis() - t0 < 2000) { if (!board::buttonPressed()) { held = false; break; } delay(20); }
   vlink::voltraLink.begin();
-  delay(500);
-  board::dumpEncoderPins();
   if (held) { vlink::voltraLink.clearPinnedAddress(); Serial.println("[BOOT] pinned address cleared"); }
 }
 

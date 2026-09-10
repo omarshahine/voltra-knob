@@ -74,7 +74,7 @@ voltra-knob/
 
 **Files:**
 - Create: `tools/build.sh`, `tools/flash.sh`, `tools/serial_tail.py`
-- Create: `firmware/libraries/` (copied from the Elecrow repo clone at `/private/tmp/claude-501/-Users-omarshahine-GitHub/fadb8c96-d402-4433-b591-48d8bf97b22a/scratchpad/crowpanel/example/Arduino/libraries`; re-clone `https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen` if that path is gone)
+- Create: `firmware/libraries/` (copied from the Elecrow repo clone at `<path-to-elecrow-repo>/example/Arduino/libraries`; re-clone `https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen` if that path is gone)
 - Create: `firmware/VoltraKnob/VoltraKnob.ino`, `firmware/VoltraKnob/partitions.csv`
 - Create: `README.md`
 
@@ -85,7 +85,7 @@ voltra-knob/
 
 ```bash
 cd ~/GitHub/voltra-knob
-SRC=/private/tmp/claude-501/-Users-omarshahine-GitHub/fadb8c96-d402-4433-b591-48d8bf97b22a/scratchpad/crowpanel/example/Arduino/libraries
+SRC=<path-to-elecrow-repo>/example/Arduino/libraries
 mkdir -p firmware/libraries
 cp -R "$SRC/Adafruit_BusIO" "$SRC/Adafruit_CST8XX_Library" "$SRC/PCF8574_library-master" firmware/libraries/
 mkdir -p firmware/libraries/GFX_Library_for_Arduino

@@ -1,49 +1,115 @@
 # Voltra Knob
 
-A physical dial for the Beyond Power VOLTRA I built on the Elecrow CrowPanel 2.1" ESP32-S3 rotary display (sold on Amazon as GrowCube). Turn to set weight, tap to load, hold to arm auto-load, tap to release. Direct BLE from the knob to the trainer: no phone, computer, or cloud in the loop.
+A physical dial for the [Beyond Power VOLTRA I](https://www.beyond-power.com/) cable trainer. Turn the knob to set the weight, tap to load, hold to arm auto-load, tap to release. It talks to the trainer directly over Bluetooth Low Energy from an ESP32-S3 round touch display. No phone, computer, or cloud service is involved once it is flashed.
 
-Design: `docs/superpowers/specs/2026-09-10-voltra-knob-design.md`
-Plan: `docs/superpowers/plans/2026-09-10-voltra-knob.md`
+This is an independent hobby project. It is not affiliated with or endorsed by Beyond Power.
 
-## Usage
+## What it does
 
-1. Power the Voltra, close the Beyond+ app, power the knob.
-2. The knob scans, connects, and identifies itself as "Voltra Knob". Accept the prompt on the Voltra the first time. The screen shows the trainer's current weight, battery, and a blue Bluetooth glyph when ready.
-3. **Turn** to set weight. Slow clicks step 1 lb. A fast spin steps 5 lb and snaps to fives, a sustained fast spin steps 10 lb and snaps to tens. The number updates instantly; the weight is sent to the Voltra a quarter second after you stop turning. Amber ring means waiting for the device to confirm.
-4. **Tap** while unloaded: load now.
-5. **Hold** 0.6 s while unloaded: arm auto-load. The pill turns amber "AUTO ARMED". When you pull, the Voltra runs a 3 s countdown ("PULL DETECTED"), engages ("ENGAGING"), and the knob turns green "LOADED". Auto-load stays active between sets until you tap; the knob never releases it on its own.
-6. **Tap** while loaded or armed: unload or cancel, always instant.
-7. Loading or unloading from the Voltra itself is reflected on the knob. Reps count while loaded.
+Everything below was verified on real hardware against a VOLTRA I.
 
-While loaded, a single dial change is limited to 25 lb from the confirmed weight; unload to make bigger jumps.
+| Feature | How |
+| --- | --- |
+| Connects on its own | Scans for the trainer's BLE service, authenticates, enters weight-training mode, subscribes to telemetry, and reads the current settings. Shows "Voltra Knob wants to connect" on the trainer the first time. |
+| Shows the real state | Current weight, battery, Bluetooth status, load state, and rep count come from the trainer, not from the knob's memory. Loading or unloading from the trainer itself is reflected within a second. |
+| Weight from the dial | One click is 1 lb. A fast spin steps 5 lb and snaps to fives; keep spinning and it steps 10 lb and snaps to tens. The number updates instantly; one BLE write with the final value goes out a quarter second after you stop. Amber ring while waiting for the trainer to confirm. |
+| Tap to load | A single tap while unloaded engages the motor at the set weight. |
+| Hold to arm auto-load | Hold 0.6 s: the trainer arms its auto-load. The knob follows the trainer's own state machine: AUTO ARMED, PULL DETECTED (3 s countdown), ENGAGING, then LOADED. Auto-load stays active between sets until you tap. |
+| Tap to release | A single tap while loaded or armed sends stop. It is never delayed, throttled, or gated. |
+| Safety limits | While loaded, one dial change can move at most 25 lb from the confirmed weight. Nothing is ever loaded at boot or reconnect, and the knob never releases the trainer on its own. |
+| Reconnects | If the trainer powers off, the knob shows SEARCHING and reconnects when it returns. The trainer's address is remembered; hold the knob while powering on to forget it. |
 
-Hold the knob while powering on to forget the pinned Voltra and pair with whichever one is found first.
+## Hardware
 
-## Safety
+Built and tested on the **Elecrow CrowPanel 2.1" HMI ESP32 Rotary Display**, sold on Amazon under the GrowCube name as "ESP32 Rotary Display 2.1 Inch HMI IPS Round Knob Touch Display" (ASIN B0GVYV3HZN).
 
-Nothing is ever loaded automatically at boot or reconnect. Unload is a single tap and is never delayed. The Voltra disengages itself if the Bluetooth link drops. Keep the Beyond+ app disconnected while using the knob; the trainer accepts one controller at a time.
+| Part | Detail |
+| --- | --- |
+| MCU | ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM, Wi-Fi + BLE 5.0, native USB |
+| Display | 2.1" round IPS, 480x480, ST7701 over parallel RGB |
+| Touch | CST8xx capacitive (initialized, unused so far) |
+| Input | Rotary encoder with push button, encoder on GPIO 42/4, button via a PCF8574 I2C expander |
+| Trainer | Beyond Power VOLTRA I |
 
-## Build
+Elecrow publishes the schematic and factory source at [Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display](https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen). Other boards with the same MCU and panel should work with pin changes in `firmware/VoltraKnob/src/board/board.cpp`.
 
-    tools/build.sh
-    tools/flash.sh
-    uv run --with pyserial tools/serial_tail.py --seconds 10
+## Using it
 
-Requires `arduino-cli` with the `esp32:esp32` core 3.x and `NimBLE-Arduino` 2.x in the sketchbook. Display, touch, and expander libraries are vendored under `firmware/libraries/`.
+1. Power the VOLTRA and fully close the Beyond+ app on your phone. The trainer accepts one controller at a time.
+2. Power the knob over USB-C. It shows SEARCHING, then CONNECTING, then the trainer's current weight with a blue Bluetooth glyph and the battery level.
+3. The first time, accept "Voltra Knob wants to connect" on the trainer's screen.
+4. Turn to set weight. Tap to load. Pull. Tap to release.
+5. For auto-load: hold the knob until the inner red ring completes. The pill turns amber AUTO ARMED. Grab the handle and pull; the trainer counts down, engages, and the knob turns green. Tap to end the session.
 
-## Test (host)
+If the pill says APP CONNECTED?, the trainer is refusing the link three times in a row, which almost always means the phone app is still connected.
 
-    tools/test.sh
+## Building
 
-Compiles the protocol and dial logic with clang and runs the assertion suites. No hardware needed.
+Tested with `arduino-cli` 1.5.1, the `esp32:esp32` core 3.3.11, and `NimBLE-Arduino` 2.5.1 on macOS. The display, touch, I2C expander, and LVGL 9.1 libraries are vendored under `firmware/libraries/` so the build is reproducible.
 
-## Protocol
+```bash
+brew install arduino-cli uv            # or your platform's equivalents
+arduino-cli config init
+arduino-cli config set board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli core update-index
+arduino-cli core install esp32:esp32
+arduino-cli lib install "NimBLE-Arduino"
 
-Frame tables come from `@voltras/node-sdk` (MIT, see `third_party/`). `tools/gen_protocol.py` turns the decoded JSON into `frames.gen.h`, ports the SDK's CRC8/CRC16 to build the custom-name auth frame and the parameter-read frames, and verifies itself by regenerating the SDK's iPad auth frame byte for byte.
+tools/build.sh                                        # compile
+tools/flash.sh                                        # upload over USB (first /dev/cu.usbmodem*)
+uv run --with pyserial tools/serial_tail.py --seconds 10   # watch the serial log
+```
+
+The board enumerates as an Espressif USB JTAG/serial device; no driver is needed on macOS. Set `PORT=/dev/...` to override the port.
+
+### Host tests
+
+```bash
+tools/test.sh
+```
+
+Compiles the protocol tables, notification decoder, and dial/button logic with clang and runs the assertion suites. No hardware needed. Run this before flashing.
+
+### Regenerating the protocol tables
+
+`third_party/voltra-protocol.json` is the decoded protocol data from the SDK. `tools/gen_protocol.py` turns it into `firmware/VoltraKnob/src/protocol/frames.gen.h`, ports the SDK's CRC8 and CRC16 to build the custom-name auth frame and the parameter-read frames, and checks itself by regenerating the SDK's iPad auth frame byte for byte. The generated header is committed so builds do not need Python.
+
+## How it works
+
+```
+Encoder task ─┐                         ┌─ BLE task (NimBLE) ── VOLTRA
+              ├─ main loop: app logic ──┤
+Button poll ──┘        │                └─ shared DeviceState (mutex)
+                       └─ LVGL UI (ViewModel)
+```
+
+| Module | Responsibility |
+| --- | --- |
+| `src/protocol` | Pure C++: frame tables, encoders, and a decoder that turns notifications into events (settings, mode, battery, telemetry, reps, auto-load registers). Host-tested. |
+| `src/app` | Pure C++: dial ramp and debounce, confirmation tracking, tap/hold classification, load-gate decisions. Host-tested. |
+| `src/link` | NimBLE client task: scan, connect, handshake, coalesced writes, status polling, reconnect with backoff. Owns `DeviceState`. |
+| `src/board` | Display, touch, expander, encoder, backlight. Reuses Elecrow's proven ST7701 init. |
+| `src/ui` | LVGL screen: 150 px numerals, tick ring, weight arc with glow, hold ring, state pill, glyphs. |
+
+Protocol facts learned the hard way are in the spec and plan under `docs/superpowers/`, including the auto-load register map (fitness mode `0x27` with `53c7` = 11 waiting, 12 countdown, 13 engaging, 14 loaded).
 
 ## Hardware notes
 
-- Encoder A/B are on GPIO 42 and 4 with no reliable external pull-up. The firmware enables the internal pull-ups and decodes full quadrature over both channels; without both, clicks are dropped.
-- One detent is two quadrature transitions on this encoder.
-- The ST7701 panel needs the R/B swap in the flush callback and MADCTL 0x08, as in Elecrow's factory sketch.
-- LVGL font compression is off in `lv_conf.h`; generate fonts with `--no-compress`.
+- The encoder lines float between detents. The firmware enables the internal pull-ups and decodes full quadrature over both channels; without both, clicks are dropped. One detent is two transitions.
+- The ST7701 panel needs the red/blue swap in the flush callback and MADCTL `0x08`, as in Elecrow's factory sketch.
+- LVGL font compression is off in `lv_conf.h`; generate fonts with `lv_font_conv --no-compress`.
+- A full ring redraw costs about 190 ms at 480x480, so the ring is throttled while the numeral updates every frame.
+
+## Credits
+
+- BLE protocol tables from [`@voltras/node-sdk`](https://www.npmjs.com/package/@voltras/node-sdk) by Henry Jewkes (MIT). See `third_party/`.
+- Display bring-up from Elecrow's factory sketch.
+- Vendored libraries: LVGL, Arduino_GFX, Adafruit BusIO, Adafruit CST8XX, PCF8574 (see `THIRD_PARTY.md`).
+
+## Safety
+
+This controls a motor that pulls on a cable with up to 200 lb of force. Read the code before you trust it, start with light weights, keep the cable clear, and keep the Beyond+ app's own controls handy. Use at your own risk.
+
+## License
+
+MIT. See `LICENSE`.

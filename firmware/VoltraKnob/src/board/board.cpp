@@ -6,7 +6,6 @@
 #include <Adafruit_CST8XX.h>
 #include "PCF8574.h"
 #include "driver/gpio.h"
-#include "esp_intr_alloc.h"
 
 namespace board {
 namespace {
@@ -178,7 +177,6 @@ void dumpEncoderPins() {
   Serial.printf("[gpio] uptime=%lu ms\n", (unsigned long)millis());
   Serial.flush();
   gpio_dump_io_configuration(stdout, (1ULL << ENCODER_A_PIN) | (1ULL << ENCODER_B_PIN));
-  esp_intr_dump(stdout);
   fflush(stdout);
 }
 

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 150 px
  * Bpp: 4
- * Opts: --font /private/tmp/claude-501/-Users-omarshahine-GitHub/fadb8c96-d402-4433-b591-48d8bf97b22a/scratchpad/crowpanel/example/Arduino/libraries/lvgl/scripts/built_in_font/Montserrat-Medium.ttf -r 0x30-0x39 --size 150 --bpp 4 --no-compress --format lvgl --lv-include lvgl.h -o firmware/VoltraKnob/src/ui/font_weight_150.c
+ * Opts: --font Montserrat-Medium.ttf -r 0x30-0x39 --size 150 --bpp 4 --no-compress --format lvgl --lv-include lvgl.h -o firmware/VoltraKnob/src/ui/font_weight_150.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
