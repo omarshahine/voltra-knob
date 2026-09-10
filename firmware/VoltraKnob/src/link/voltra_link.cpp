@@ -23,7 +23,7 @@ constexpr uint32_t CONNECT_TIMEOUT_MS = 5000;
 constexpr uint16_t MTU_REQUEST = 527;
 constexpr int APP_SUSPECT_AFTER_FAILURES = 3;
 constexpr uint32_t ARM_POLL_MS = 500;
-constexpr uint32_t ARM_TIMEOUT_MS = 18000;
+constexpr int GUIDED_WAITING = 11, GUIDED_COUNTDOWN = 12, GUIDED_ENGAGING = 13, GUIDED_LOADED = 14;
 
 DeviceState g_state;
 SemaphoreHandle_t g_mutex = nullptr;
@@ -42,8 +42,8 @@ uint32_t g_lastWriteMs = 0;
 String g_pinned;   // pinned device address read from NVS at the start of each scan
 bool g_useFallbackAuth = false;   // switch to the SDK iPhone identity if the custom name is rejected
 volatile int g_pendingWeight = -1;   // latest dial target not yet written; coalesces bursts into one frame
-uint32_t g_armedAtMs = 0;
 uint32_t g_lastArmPollMs = 0;
+int g_lastFmValue = -1;
 
 void setState(void (*fn)(DeviceState&)) {
   xSemaphoreTake(g_mutex, portMAX_DELAY);
@@ -51,31 +51,54 @@ void setState(void (*fn)(DeviceState&)) {
   xSemaphoreGive(g_mutex);
 }
 
-// Device-reported motor state (893e). Called with the state mutex held.
-void applyFitnessMode(int fm) {
-  if (voltra::fitnessModeLoaded(fm)) {
-    if (!g_state.loaded) { g_state.loaded = true; g_state.reps = 0; Serial.printf("[link] device reports loaded (fm=%d)\n", fm); }
-    g_state.armed = false; g_state.countdownMs = -1;
-  } else if (voltra::fitnessModeArmed(fm)) {
-    if (!g_state.armed) Serial.printf("[link] device reports auto-load armed (fm=%d)\n", fm);
-    g_state.armed = true; g_state.loaded = false;
-  } else if (voltra::fitnessModeUnloaded(fm)) {
-    if (g_state.loaded || g_state.armed) Serial.printf("[link] device reports unloaded (fm=%d)\n", fm);
-    g_state.loaded = false; g_state.armed = false; g_state.countdownMs = -1;
-  }
+// Device-reported state. Called with the state mutex held.
+// Plain load: 893e = 5. Auto-load: 893e = 0x27 for the whole session; 53c7 says where it is.
+void recomputeLoadState(const char *why) {
+  const bool wasLoaded = g_state.loaded, wasArmed = g_state.armed;
+  if (g_state.mode < 0 && g_lastFmValue < 0) return;
+  const int fm = g_lastFmValue;
+  if (fm == 5) { g_state.loaded = true; g_state.armed = false; }
+  else if (fm == 0x27) {
+    const bool engaged = g_state.guidedState >= GUIDED_LOADED;
+    g_state.loaded = engaged; g_state.armed = !engaged;
+    if (g_state.guidedState != GUIDED_COUNTDOWN) g_state.countdownMs = -1;
+  } else if (voltra::fitnessModeArmed(fm)) { g_state.loaded = false; g_state.armed = true; }
+  else if (voltra::fitnessModeUnloaded(fm)) { g_state.loaded = false; g_state.armed = false; g_state.countdownMs = -1; g_state.guidedState = -1; }
+  if (g_state.loaded && !wasLoaded) g_state.reps = 0;
+  if (g_state.loaded != wasLoaded || g_state.armed != wasArmed)
+    Serial.printf("[link] state %s: loaded=%d armed=%d (fm=0x%02x gs=%d, %s)\n", why, (int)g_state.loaded, (int)g_state.armed, fm, g_state.guidedState, why);
 }
+
+void applyFitnessMode(int fm) {
+  g_lastFmValue = fm;
+  recomputeLoadState("fitness mode");
+}
+
+int g_lastFm = -2, g_lastGs = -2, g_lastGc = -2, g_lastCd = -2, g_lastSafety = -2;
 
 void onNotify(NimBLERemoteCharacteristic *, uint8_t *data, size_t len, bool) {
   g_lastNotifyMs = millis();
   const voltra::Event e = voltra::decode(data, len);
+  // Trace every change of the load-related registers (diagnostic; cheap when nothing changes).
+  if (e.fitnessMode >= 0 && e.fitnessMode != g_lastFm) { g_lastFm = e.fitnessMode; Serial.printf("[reg] t=%lu 893e fitnessMode=0x%02x\n", (unsigned long)millis(), e.fitnessMode); }
+  if (e.guidedState >= 0 && e.guidedState != g_lastGs) { g_lastGs = e.guidedState; Serial.printf("[reg] t=%lu 53c7 state=%d\n", (unsigned long)millis(), e.guidedState); }
+  if (e.guidedCtrl >= 0 && e.guidedCtrl != g_lastGc) { g_lastGc = e.guidedCtrl; Serial.printf("[reg] t=%lu 53c9 ctrl=%d\n", (unsigned long)millis(), e.guidedCtrl); }
+  if (e.guidedCountdownMs >= 0 && e.guidedCountdownMs != g_lastCd) { g_lastCd = e.guidedCountdownMs; Serial.printf("[reg] t=%lu 53c8 countdown=%d\n", (unsigned long)millis(), e.guidedCountdownMs); }
+  if (e.guidedSafety >= 0 && e.guidedSafety != g_lastSafety) { g_lastSafety = e.guidedSafety; Serial.printf("[reg] t=%lu 538d safety=%d\n", (unsigned long)millis(), e.guidedSafety); }
+  if (e.type == voltra::EventType::PerRep || e.type == voltra::EventType::SetSummary) Serial.printf("[reg] t=%lu rep frame reps=%d\n", (unsigned long)millis(), e.repCount);
   xSemaphoreTake(g_mutex, portMAX_DELAY);
   switch (e.type) {
     case voltra::EventType::Settings:
       if (e.weightLbs >= 0) { g_state.weightLbs = e.weightLbs; ++g_state.confirmSeq; }
       if (e.mode >= 0) g_state.mode = e.mode;
       if (e.fitnessMode >= 0) applyFitnessMode(e.fitnessMode);
-      if (e.guidedCountdownMs >= 0 && g_state.armed) g_state.countdownMs = e.guidedCountdownMs;
+      if (e.guidedState >= 0 && e.guidedState != g_state.guidedState) { g_state.guidedState = e.guidedState; recomputeLoadState("guided state"); }
+      if (e.guidedCountdownMs >= 0) g_state.countdownMs = g_state.guidedState == GUIDED_COUNTDOWN ? e.guidedCountdownMs : -1;
       g_handshakeEvent = true;
+      break;
+    case voltra::EventType::PerRep:
+      if (e.repCount >= 0) g_state.reps = e.repCount;
+      if (!g_state.loaded && g_state.armed) { g_state.guidedState = GUIDED_LOADED; recomputeLoadState("rep frame"); }
       break;
     case voltra::EventType::ModeConfirmed:
       if (e.mode >= 0) g_state.mode = e.mode;
@@ -90,9 +113,6 @@ void onNotify(NimBLERemoteCharacteristic *, uint8_t *data, size_t len, bool) {
         for (size_t i = 0; i < len && i < 24; ++i) Serial.printf(" %02x", data[i]);
         Serial.println();
       }
-      break;
-    case voltra::EventType::PerRep:
-      if (e.repCount >= 0) g_state.reps = e.repCount;
       break;
     default:
       break;
@@ -144,7 +164,8 @@ bool writeRaw(voltra::Frame f) {   // no spacing; used inside the init pair
 }
 
 bool connectAndHandshake() {
-  setState([](DeviceState &s) { s.link = LinkState::Connecting; s.loaded = false; s.armed = false; s.countdownMs = -1; s.reps = 0; });
+  g_lastFmValue = -1;
+  setState([](DeviceState &s) { s.link = LinkState::Connecting; s.loaded = false; s.armed = false; s.countdownMs = -1; s.guidedState = -1; s.reps = 0; });
   g_disconnected = false;
   g_handshakeEvent = false;
   if (!g_client) {
@@ -203,24 +224,19 @@ void servicePump() {
         if (!ok) { g_disconnected = true; continue; }
       }
     }
-    // While auto-load is armed, poll the guided-load status registers and time the arm out.
-    bool armedNow; xSemaphoreTake(g_mutex, portMAX_DELAY); armedNow = g_state.armed; xSemaphoreGive(g_mutex);
-    if (armedNow) {
-      if (millis() - g_armedAtMs > ARM_TIMEOUT_MS) {
-        Serial.println("[link] auto-load arm timed out; releasing");
-        writeFrame(voltra::stopFrame());
-        setState([](DeviceState &st) { st.armed = false; st.countdownMs = -1; });
-      } else if (millis() - g_lastArmPollMs >= ARM_POLL_MS) {
-        g_lastArmPollMs = millis();
-        writeFrame(voltra::readGuidedLoadStatusFrame());
-      }
+    // While auto-load is active (armed, counting down, engaging, or loaded via auto-load), poll its
+    // status registers so the knob follows the device. Never time out or release on our own.
+    bool autoActive; xSemaphoreTake(g_mutex, portMAX_DELAY); autoActive = g_lastFmValue == 0x27; xSemaphoreGive(g_mutex);
+    if (autoActive && millis() - g_lastArmPollMs >= ARM_POLL_MS) {
+      g_lastArmPollMs = millis();
+      writeFrame(voltra::readGuidedLoadStatusFrame());
     }
     if (xQueueReceive(g_cmdQueue, &cmd, pdMS_TO_TICKS(20)) != pdTRUE) continue;
     switch (cmd.type) {
       case CmdType::Arm: {
         const bool ok = writeFrame(voltra::guidedLoadTriggerFrame());
         Serial.printf("[link] arm auto-load -> %s\n", ok ? "ok" : "FAIL");
-        if (ok) { g_armedAtMs = millis(); g_lastArmPollMs = 0; setState([](DeviceState &st) { st.armed = true; st.countdownMs = -1; }); }
+        if (ok) { g_lastArmPollMs = 0; setState([](DeviceState &st) { st.armed = true; st.countdownMs = -1; st.guidedState = GUIDED_WAITING; }); }
         else g_disconnected = true;
         break;
       }
@@ -235,7 +251,7 @@ void servicePump() {
       case CmdType::Unload: {
         const bool ok = writeFrame(voltra::stopFrame());
         Serial.printf("[link] unload -> %s\n", ok ? "ok" : "FAIL");
-        setState([](DeviceState &s) { s.loaded = false; s.armed = false; s.countdownMs = -1; });
+        setState([](DeviceState &s) { s.loaded = false; s.armed = false; s.countdownMs = -1; s.guidedState = -1; });
         if (!ok) g_disconnected = true;
         break;
       }

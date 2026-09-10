@@ -131,6 +131,8 @@ static void testDecode() {
   e = decode(b, n); CHECK(e.type == EventType::Settings); CHECK_EQ(e.guidedCountdownMs, 2500); CHECK_EQ(e.guidedSafety, 0);
   // Fitness mode 0x26 = armed, not unloaded.
   CHECK(fitnessModeArmed(0x26)); CHECK(!fitnessModeUnloaded(0x26)); CHECK(!fitnessModeLoaded(0x26));
+  CHECK(fitnessModeArmed(0x27)); CHECK(!fitnessModeLoaded(0x27)); CHECK(fitnessModeLoaded(5));
+  CHECK_EQ(e.guidedState, 1); CHECK_EQ(e.guidedCtrl, 1);
   // Trigger frame: vendor cmd 0xaa, sub-command 0x12, 14 bytes with valid length byte.
   CHECK_EQ(guidedLoadTriggerFrame().len, 14u);
   CHECK_EQ((int)guidedLoadTriggerFrame().data[10], 0xaa); CHECK_EQ((int)guidedLoadTriggerFrame().data[11], 0x12);

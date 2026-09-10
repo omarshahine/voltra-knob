@@ -54,6 +54,8 @@ inline void applyParam(Event& e, uint8_t hi, uint8_t lo, int value) {
   else if (hi == 0x89 && lo == 0x3e) e.fitnessMode = value;
   else if (hi == 0xc8 && lo == 0x53) e.guidedCountdownMs = value;
   else if (hi == 0x8d && lo == 0x53) e.guidedSafety = value;
+  else if (hi == 0xc7 && lo == 0x53) e.guidedState = value;
+  else if (hi == 0xc9 && lo == 0x53) e.guidedCtrl = value;
 }
 }  // namespace
 

@@ -38,6 +38,8 @@ struct Event {
   int fitnessMode = -1; // Settings, ModeConfirmed: 893e register; 5 or 0x27 = motor engaged, 4 = ready, 0x26 = auto-load armed
   int guidedCountdownMs = -1; // Settings: 53c8 register while auto-load is armed
   int guidedSafety = -1;      // Settings: 538d register (0 = ok)
+  int guidedState = -1;       // Settings: 53c7 register
+  int guidedCtrl = -1;        // Settings: 53c9 register
   int battery = -1;     // Battery, 0..100
   int phase = -1;       // Telemetry: 0 idle, 1 concentric, 2 hold, 3 eccentric
   int repCount = -1;    // PerRep, SetSummary
@@ -45,8 +47,9 @@ struct Event {
 };
 
 constexpr int FITNESS_MODE_AUTOLOAD_ARMED = 0x26;
-constexpr bool fitnessModeLoaded(int fm) { return fm == 5 || fm == 0x27; }
-constexpr bool fitnessModeArmed(int fm) { return fm == FITNESS_MODE_AUTOLOAD_ARMED; }
+// 0x27 (direct-load active) is reported right after arming, before the pull, so it counts as armed.
+constexpr bool fitnessModeLoaded(int fm) { return fm == 5; }
+constexpr bool fitnessModeArmed(int fm) { return fm == FITNESS_MODE_AUTOLOAD_ARMED || fm == 0x27; }
 constexpr bool fitnessModeUnloaded(int fm) { return fm == 4 || fm == 0; }
 
 // Decode one BLE notification. Never throws; unknown or short input yields EventType::Unknown.

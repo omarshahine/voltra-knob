@@ -13,6 +13,7 @@ struct DeviceState {
   bool loaded = false;     // device reports motor engaged
   bool armed = false;      // auto-load armed; device will engage after its countdown / first pull
   int countdownMs = -1;    // remaining auto-load countdown when known
+  int guidedState = -1;    // 53c7: 11 waiting, 12 countdown, 13 engaging, 14 loaded (while fitness mode is 0x27)
   int reps = 0;            // from per-rep frames since last load
   uint32_t confirmSeq = 0; // increments on every device weight confirmation
 };

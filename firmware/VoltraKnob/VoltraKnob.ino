@@ -18,7 +18,11 @@ static const char *stateText(const vlink::DeviceState &s) {
     case vlink::LinkState::AppConnectedSuspect: return "APP CONNECTED?";
     case vlink::LinkState::Ready:
       if (s.loaded) return "LOADED";
-      if (s.armed) return s.countdownMs > 0 ? "AUTO LOADING" : "AUTO ARMED";
+      if (s.armed) {
+        if (s.guidedState == 12) return "PULL DETECTED";
+        if (s.guidedState == 13) return "ENGAGING";
+        return "AUTO ARMED";
+      }
       return "UNLOADED";
   }
   return "";
