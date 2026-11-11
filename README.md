@@ -31,7 +31,16 @@ Built and tested on the **Elecrow CrowPanel 2.1" HMI ESP32 Rotary Display**, sol
 | Input | Rotary encoder with push button, encoder on GPIO 42/4, button via a PCF8574 I2C expander |
 | Trainer | Beyond Power VOLTRA I |
 
-Elecrow publishes the schematic and factory source at [Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display](https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen). Other boards with the same MCU and panel should work with pin changes in `firmware/VoltraKnob/src/board/board.cpp`.
+### Also supported: Waveshare ESP32-S3-Knob-Touch-LCD-1.8
+
+The [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8) (360x360 ST77916 QSPI display, CST816 touch, DRV2605 haptics) works too. Build and flash it with `BOARD=waveshare tools/build.sh` and `BOARD=waveshare tools/flash.sh`. The differences:
+
+- **No push button.** The touchscreen is the button: tap anywhere to load or release, hold anywhere to arm auto-load, and touch the screen while powering on to forget the trainer.
+- **Haptics.** A tick while turning, a click on load or release, a double click on arm.
+- **Two chips behind a USB switch.** The ESP32-S3 enumerates as an Espressif USB JTAG/serial device (`303A:1001`, `/dev/cu.usbmodem*`). If you get a CH340 port (`/dev/cu.usbserial-*`) instead, you are talking to the board's secondary ESP32: flip the USB-C plug over.
+- If clockwise turns lower the weight, set `ENCODER_INVERT = 1` in `firmware/VoltraKnob/src/board/board_waveshare.cpp`.
+
+Elecrow publishes the schematic and factory source at [Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display](https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen). Other boards with the same MCU and panel should work with pin changes in `firmware/VoltraKnob/src/board/board.cpp`. Board selection lives in `src/board/board_config.h`.
 
 ## Using it
 

@@ -1,3 +1,5 @@
+#include "board_config.h"
+#if !VOLTRA_BOARD_WAVESHARE_KNOB18
 #include "board.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -197,4 +199,8 @@ void setBacklight(uint8_t level) {
   ledcWrite(SCREEN_BACKLIGHT_PIN, level);
 }
 
+void haptic(Haptic) {}   // no haptic motor on this board
+
 }  // namespace board
+
+#endif  // !VOLTRA_BOARD_WAVESHARE_KNOB18
