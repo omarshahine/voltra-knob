@@ -10,6 +10,7 @@
 #include "board.h"
 #include <Arduino.h>
 #include <Wire.h>
+#include <atomic>
 #include <lvgl.h>
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -18,6 +19,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_timer.h"
 #include "lcd_qspi_panel.h"
+#include "../app/app_logic.h"
 
 namespace board {
 namespace {
@@ -56,9 +58,9 @@ esp_timer_handle_t encoderTimer = nullptr;
 bool hapticsOk = false;
 bool touchOk = false;
 
-volatile uint32_t g_encLoops = 0, g_encEdges = 0, g_edgesA = 0, g_edgesB = 0;
-volatile uint32_t g_encLevelA = 0, g_encLevelB = 0;
-volatile uint32_t g_flushes = 0, g_flushPixels = 0, g_flushMaxUs = 0;
+std::atomic<uint32_t> g_encLoops{0}, g_encEdges{0}, g_edgesA{0}, g_edgesB{0};
+std::atomic<uint32_t> g_encLevelA{0}, g_encLevelB{0};
+std::atomic<uint32_t> g_flushes{0}, g_flushPixels{0}, g_flushMaxUs{0}, g_flushErrors{0};
 
 // ---- I2C helpers (only the main loop touches the bus) ----
 bool i2cWrite(uint8_t addr, uint8_t reg, uint8_t val) {
@@ -86,16 +88,23 @@ bool onColorTransDone(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *
   return false;
 }
 
-void dispFlush(lv_display_t *, const lv_area_t *area, uint8_t *px_map) {
+void dispFlush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   const uint32_t w = area->x2 - area->x1 + 1;
   const uint32_t h = area->y2 - area->y1 + 1;
   const uint32_t tStart = micros();
   ++g_flushes; g_flushPixels += w * h;
   lv_draw_sw_rgb565_swap(px_map, w * h);   // QSPI panel wants big-endian RGB565
-  esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
+  const esp_err_t err = esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
   const uint32_t dt = micros() - tStart;
   if (dt > g_flushMaxUs) g_flushMaxUs = dt;
-  // lv_display_flush_ready() comes from onColorTransDone once the DMA finishes.
+  if (err != ESP_OK) {
+    // No transfer was queued, so no completion callback will come: release the buffer here or
+    // LVGL waits forever and the main loop (knob, button, BLE writes) stalls. The area is lost
+    // until its next redraw.
+    ++g_flushErrors;
+    lv_display_flush_ready(disp);
+  }
+  // Otherwise lv_display_flush_ready() comes from onColorTransDone once the DMA finishes.
 }
 
 // The ST77916 wants even-aligned windows.
@@ -170,23 +179,9 @@ bool hapticsBegin() {
 }
 
 // ---- Knob ----
-// Port of Waveshare's bidi_switch_knob.c: each channel fires once per rising edge that follows a
-// stable low; a pulse on A is one step clockwise, a pulse on B one step counterclockwise.
-struct Channel { uint8_t prev = 1; uint8_t debounce = 0; };
-Channel chA, chB;
-constexpr uint8_t DEBOUNCE_TICKS = 2;
-
-bool risingEdge(Channel &ch, uint8_t level) {
-  bool fired = false;
-  if (level == 0) {
-    if (level != ch.prev) ch.debounce = 0; else ch.debounce++;
-  } else {
-    if (level != ch.prev && ++ch.debounce >= DEBOUNCE_TICKS) { ch.debounce = 0; fired = true; }
-    else ch.debounce = 0;
-  }
-  ch.prev = level;
-  return fired;
-}
+// Waveshare's "bidirectional switch" decoding (app::PulseChannel, host-tested): a pulse on A is
+// one step clockwise, a pulse on B one step counterclockwise.
+app::PulseChannel chA, chB;
 
 void emitStep(bool cw) {
   RotateEvent ev;
@@ -199,8 +194,8 @@ void encoderPoll(void *) {
   const uint8_t a = gpio_get_level((gpio_num_t)ENCODER_A_PIN);
   const uint8_t b = gpio_get_level((gpio_num_t)ENCODER_B_PIN);
   ++g_encLoops; g_encLevelA = a; g_encLevelB = b;
-  if (risingEdge(chA, a)) { ++g_edgesA; ++g_encEdges; emitStep(true); }
-  if (risingEdge(chB, b)) { ++g_edgesB; ++g_encEdges; emitStep(false); }
+  if (chA.sample(a)) { ++g_edgesA; ++g_encEdges; emitStep(true); }
+  if (chB.sample(b)) { ++g_edgesB; ++g_encEdges; emitStep(false); }
 }
 
 }  // namespace
@@ -261,11 +256,14 @@ bool pollRotate(RotateEvent& out) {
   return rotateQueue && xQueueReceive(rotateQueue, &out, 0) == pdTRUE;
 }
 
-bool buttonPressed() {
-  if (!touchOk) return false;
+ButtonRead readButton() {
+  if (!touchOk) return ButtonRead::Released;   // no controller at boot: there is no button
   uint8_t fingers = 0;
-  return i2cRead(ADDR_CST816, 0x02, &fingers, 1) && fingers > 0;
+  if (!i2cRead(ADDR_CST816, 0x02, &fingers, 1)) return ButtonRead::Error;
+  return fingers > 0 ? ButtonRead::Pressed : ButtonRead::Released;
 }
+
+bool buttonPressed() { return readButton() == ButtonRead::Pressed; }
 
 void setBacklight(uint8_t level) {
   ledcWrite(PIN_LCD_BL, level);
@@ -297,6 +295,7 @@ DebugStats debugStats() {
   d.queueWaiting = rotateQueue ? uxQueueMessagesWaiting(rotateQueue) : 0;
   d.edgesA = g_edgesA; d.edgesB = g_edgesB;
   d.flushes = g_flushes; d.flushPixels = g_flushPixels; d.flushMaxUs = g_flushMaxUs;
+  if (g_flushErrors) { Serial.printf("[board] %u panel draw errors\n", (unsigned)g_flushErrors); g_flushErrors = 0; }
   g_flushes = 0; g_flushPixels = 0; g_flushMaxUs = 0;
   return d;
 }

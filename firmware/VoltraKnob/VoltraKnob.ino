@@ -72,7 +72,10 @@ void loop() {
   static uint32_t lastButtonPoll = 0;
   if (now - lastButtonPoll >= 10) {
     lastButtonPoll = now;
-    const app::ButtonAction a = button.onLevel(board::buttonPressed(), now);
+    const board::ButtonRead level = board::readButton();
+    app::ButtonAction a = app::ButtonAction::None;
+    if (level == board::ButtonRead::Error) button.cancel(now);   // unknown level: never guess a release
+    else a = button.onLevel(level == board::ButtonRead::Pressed, now);
     switch (app::decideLoad(a, ready, dev.loaded, dev.armed)) {
       case app::LoadCommand::Load: Serial.println("[app] load requested"); vlink::voltraLink.requestLoad(); board::haptic(board::Haptic::Click); break;
       case app::LoadCommand::Unload: Serial.println("[app] unload requested"); vlink::voltraLink.requestUnload(); board::haptic(board::Haptic::Click); break;

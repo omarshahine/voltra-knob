@@ -7,7 +7,9 @@ struct RotateEvent { int8_t direction; uint32_t ms; };   // +1 clockwise, -1 cou
 
 bool begin();                       // expander, display, LVGL display driver, touch, encoder task
 bool pollRotate(RotateEvent& out);  // non-blocking; drains the encoder queue one event at a time
-bool buttonPressed();               // true while pressed (CrowPanel: PCF8574 P5; Waveshare: finger on the screen)
+enum class ButtonRead : uint8_t { Released, Pressed, Error };
+ButtonRead readButton();            // CrowPanel: PCF8574 P5; Waveshare: finger on the screen. Error = level unknown
+bool buttonPressed();               // readButton() == Pressed
 void setBacklight(uint8_t level);   // 0..255
 
 enum class Haptic : uint8_t { Tick, Click, Double };
