@@ -1,12 +1,12 @@
 # Voltra Knob
 
-A physical dial for the [Beyond Power VOLTRA I](https://www.beyond-power.com/) cable trainer. Turn the knob to set the weight, tap to load, hold to arm auto-load, tap to release. It talks to the trainer directly over Bluetooth Low Energy from an ESP32-S3 round touch display. No phone, computer, or cloud service is involved once it is flashed.
+A physical dial for the [Beyond Power VOLTRA I](https://www.beyond-power.com/) cable trainer. Turn the knob to set the weight, tap to load, hold to arm auto-load, tap to release. It talks to the trainer directly over Bluetooth Low Energy from an ESP32-S3 round knob display (the Elecrow CrowPanel 2.1" or the Waveshare ESP32-S3-Knob-Touch-LCD-1.8). No phone, computer, or cloud service is involved once it is flashed.
 
 This is an independent hobby project. It is not affiliated with or endorsed by Beyond Power.
 
 ## What it does
 
-Everything below was verified on real hardware against a VOLTRA I.
+Everything below was verified on real hardware (CrowPanel) against a VOLTRA I.
 
 | Feature | How |
 | --- | --- |
@@ -21,17 +21,28 @@ Everything below was verified on real hardware against a VOLTRA I.
 
 ## Hardware
 
-Built and tested on the **Elecrow CrowPanel 2.1" HMI ESP32 Rotary Display**, sold on Amazon under the GrowCube name as "ESP32 Rotary Display 2.1 Inch HMI IPS Round Knob Touch Display". This is the exact unit used: [Amazon link](https://amzn.to/3UJtFTg) (affiliate link).
+Two ESP32-S3 round knob displays are supported. Pick one at build time with `BOARD` (see [Building](#building)).
 
-| Part | Detail |
-| --- | --- |
-| MCU | ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM, Wi-Fi + BLE 5.0, native USB |
-| Display | 2.1" round IPS, 480x480, ST7701 over parallel RGB |
-| Touch | CST8xx capacitive (initialized, unused so far) |
-| Input | Rotary encoder with push button, encoder on GPIO 42/4, button via a PCF8574 I2C expander |
-| Trainer | Beyond Power VOLTRA I |
+| | Elecrow CrowPanel 2.1" (`BOARD=crowpanel`, default) | Waveshare ESP32-S3-Knob-Touch-LCD-1.8 (`BOARD=waveshare`) |
+| --- | --- | --- |
+| Where to get it | Sold on Amazon under the GrowCube name as "ESP32 Rotary Display 2.1 Inch HMI IPS Round Knob Touch Display". Exact unit used: [Amazon link](https://amzn.to/3UJtFTg) (affiliate link) | [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8), also sold on AliExpress |
+| MCU | ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM | ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM, plus a secondary ESP32 (unused) |
+| Display | 2.1" round IPS, 480x480, ST7701 over parallel RGB | 1.8" round, 360x360, ST77916 over QSPI |
+| Touch | CST8xx capacitive (unused) | CST816 capacitive: this is the button |
+| Input | Rotary encoder with push button (button on a PCF8574 I2C expander) | Rotary encoder, no push button |
+| Haptics | None | DRV2605 motor: tick while turning, click on load or release, double click on arm |
+| Status | Everything below verified against a VOLTRA I | Flashes, boots and draws the UI. Knob, touch, haptics and the trainer link still being verified |
 
-Elecrow publishes the schematic and factory source at [Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display](https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen). Other boards with the same MCU and panel should work with pin changes in `firmware/VoltraKnob/src/board/board.cpp`.
+### Waveshare notes
+
+- **The screen is the button.** Wherever this README says tap or hold the knob, tap or hold anywhere on the screen instead. Touch the screen while powering on to forget the trainer.
+- **Two chips behind a USB switch.** The USB-C port reaches a different chip depending on which way the plug is inserted. The ESP32-S3 shows up as an Espressif USB JTAG/serial device (`303A:1001`, `/dev/cu.usbmodem*`). If you get a CH340 port (`/dev/cu.usbserial-*`) instead, you are talking to the secondary ESP32 and esptool reports "This chip is ESP32": flip the USB-C plug over.
+- **macOS asks before a new USB accessory can connect.** If no serial port appears at all, look for the "Allow accessory to connect?" prompt and approve it. Unplugging or flipping the cable brings the prompt back.
+- If clockwise turns lower the weight, set `ENCODER_INVERT = 1` in `firmware/VoltraKnob/src/board/board_waveshare.cpp`.
+
+### Other boards
+
+Board selection lives in `firmware/VoltraKnob/src/board/board_config.h`; each board implements the small API in `board.h` (`board.cpp` for the CrowPanel, `board_waveshare.cpp` for the Waveshare). The UI scales its 480 px layout to the screen size. Elecrow publishes the CrowPanel schematic and factory source at [Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display](https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480-IPS-Round-Touch-Knob-Screen).
 
 ## Using it
 
@@ -55,8 +66,11 @@ arduino-cli core update-index
 arduino-cli core install esp32:esp32
 arduino-cli lib install "NimBLE-Arduino"
 
-tools/build.sh                                        # compile
+tools/build.sh                                        # compile for the CrowPanel (default)
 tools/flash.sh                                        # upload over USB (first /dev/cu.usbmodem*)
+
+BOARD=waveshare tools/build.sh                        # compile for the Waveshare 1.8" knob
+BOARD=waveshare tools/flash.sh                        # upload it
 uv run --with pyserial tools/serial_tail.py --seconds 10   # watch the serial log
 ```
 
@@ -88,22 +102,24 @@ Button poll ──┘        │                └─ shared DeviceState (mutex
 | `src/protocol` | Pure C++: frame tables, encoders, and a decoder that turns notifications into events (settings, mode, battery, telemetry, reps, auto-load registers). Host-tested. |
 | `src/app` | Pure C++: dial ramp and debounce, confirmation tracking, tap/hold classification, load-gate decisions. Host-tested. |
 | `src/link` | NimBLE client task: scan, connect, handshake, coalesced writes, status polling, reconnect with backoff. Owns `DeviceState`. |
-| `src/board` | Display, touch, expander, encoder, backlight. Reuses Elecrow's proven ST7701 init. |
+| `src/board` | Display, touch, encoder, backlight, haptics, one file per board. CrowPanel reuses Elecrow's ST7701 init; Waveshare drives the ST77916 through `esp_lcd`. |
 | `src/ui` | LVGL screen: 150 px numerals, tick ring, weight arc with glow, hold ring, state pill, glyphs. |
 
 Protocol facts learned the hard way are in the spec and plan under `docs/superpowers/`, including the auto-load register map (fitness mode `0x27` with `53c7` = 11 waiting, 12 countdown, 13 engaging, 14 loaded).
 
 ## Hardware notes
 
-- The encoder lines float between detents. The firmware enables the internal pull-ups and decodes full quadrature over both channels; without both, clicks are dropped. One detent is two transitions.
-- The ST7701 panel needs the red/blue swap in the flush callback and MADCTL `0x08`, as in Elecrow's factory sketch.
+- CrowPanel: the encoder lines float between detents. The firmware enables the internal pull-ups and decodes full quadrature over both channels; without both, clicks are dropped. One detent is two transitions.
+- CrowPanel: the ST7701 panel needs the red/blue swap in the flush callback and MADCTL `0x08`, as in Elecrow's factory sketch.
 - LVGL font compression is off in `lv_conf.h`; generate fonts with `lv_font_conv --no-compress`.
+- Waveshare: the ST77916 wants even-aligned draw windows and big-endian RGB565; the flush callback handles both. Its knob is decoded as Waveshare's "bidirectional switch": a pulse on A is one step clockwise, a pulse on B one step counterclockwise.
 - A full ring redraw costs about 190 ms at 480x480, so the ring is throttled while the numeral updates every frame.
 
 ## Credits
 
 - BLE protocol tables from [`@voltras/node-sdk`](https://www.npmjs.com/package/@voltras/node-sdk) by Henry Jewkes (MIT). See `third_party/`.
-- Display bring-up from Elecrow's factory sketch.
+- CrowPanel display bring-up from Elecrow's factory sketch.
+- Waveshare panel driver and bring-up from [kirby6365/voltra_remote](https://github.com/kirby6365/voltra_remote) (MIT).
 - Vendored libraries: LVGL, Arduino_GFX, Adafruit BusIO, Adafruit CST8XX, PCF8574 (see `THIRD_PARTY.md`).
 
 ## Safety

@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <lvgl.h>
+#include "src/board/board_config.h"
 #include "src/board/board.h"
 #include "src/app/app_logic.h"
 #include "src/ui/ui.h"
@@ -31,7 +32,7 @@ static const char *stateText(const vlink::DeviceState &s) {
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.println("[BOOT] VoltraKnob");
+  Serial.println("[BOOT] VoltraKnob (" BOARD_NAME ")");
   board::begin();
   ui::begin();
   // Holding the button during the first two seconds clears the pinned device address.
@@ -64,17 +65,21 @@ void loop() {
   {
     int got = 0;
     while (board::pollRotate(ev)) { ++g_rotates; ++got; if (ready) dial.rotate(ev.direction, ev.ms); }
+    if (got && ready) board::haptic(board::Haptic::Tick);   // one tick per loop pass, not per detent
     (void)got;
   }
 
   static uint32_t lastButtonPoll = 0;
   if (now - lastButtonPoll >= 10) {
     lastButtonPoll = now;
-    const app::ButtonAction a = button.onLevel(board::buttonPressed(), now);
+    const board::ButtonRead level = board::readButton();
+    app::ButtonAction a = app::ButtonAction::None;
+    if (level == board::ButtonRead::Error) button.cancel(now);   // unknown level: never guess a release
+    else a = button.onLevel(level == board::ButtonRead::Pressed, now);
     switch (app::decideLoad(a, ready, dev.loaded, dev.armed)) {
-      case app::LoadCommand::Load: Serial.println("[app] load requested"); vlink::voltraLink.requestLoad(); break;
-      case app::LoadCommand::Unload: Serial.println("[app] unload requested"); vlink::voltraLink.requestUnload(); break;
-      case app::LoadCommand::ArmAutoLoad: Serial.println("[app] arm auto-load requested"); vlink::voltraLink.requestArmAutoLoad(); break;
+      case app::LoadCommand::Load: Serial.println("[app] load requested"); vlink::voltraLink.requestLoad(); board::haptic(board::Haptic::Click); break;
+      case app::LoadCommand::Unload: Serial.println("[app] unload requested"); vlink::voltraLink.requestUnload(); board::haptic(board::Haptic::Click); break;
+      case app::LoadCommand::ArmAutoLoad: Serial.println("[app] arm auto-load requested"); vlink::voltraLink.requestArmAutoLoad(); board::haptic(board::Haptic::Double); break;
       default: break;
     }
   }

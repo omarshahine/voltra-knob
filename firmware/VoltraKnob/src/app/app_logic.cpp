@@ -59,7 +59,20 @@ bool WeightDial::pollTimeout(uint32_t now) {
   return true;
 }
 
+void ButtonClassifier::cancel(uint32_t now) {
+  if (!pressed_ && !cancelled_) return;   // nothing in progress
+  cancelled_ = true;
+  pressed_ = false;
+  holdFired_ = false;
+  haveEdge_ = true;
+  lastEdgeMs_ = now;
+}
+
 ButtonAction ButtonClassifier::onLevel(bool pressed, uint32_t now) {
+  if (cancelled_) {
+    if (!pressed) { cancelled_ = false; haveEdge_ = true; lastEdgeMs_ = now; }
+    return ButtonAction::None;
+  }
   if (pressed != pressed_) {
     if (haveEdge_ && now - lastEdgeMs_ < CONTACT_BOUNCE_MS) return ButtonAction::None;
     haveEdge_ = true;
@@ -75,6 +88,19 @@ ButtonAction ButtonClassifier::onLevel(bool pressed, uint32_t now) {
     return ButtonAction::HoldComplete;
   }
   return ButtonAction::None;
+}
+
+bool PulseChannel::sample(uint8_t level) {
+  bool fired = false;
+  if (level == 0) {
+    if (prev != 0) lowCount = 1;                     // first low sample
+    else if (lowCount < DEBOUNCE) ++lowCount;        // saturate: a long hold never wraps
+  } else if (prev == 0) {
+    fired = lowCount >= DEBOUNCE;
+    lowCount = 0;
+  }
+  prev = level;
+  return fired;
 }
 
 float ButtonClassifier::holdProgress(uint32_t now) const {

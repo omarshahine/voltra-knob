@@ -2,11 +2,31 @@
 #include <lvgl.h>
 #include <cstring>
 #include <cstdint>
+#include "../board/board_config.h"
 
 extern "C" const lv_font_t font_weight_150;
+extern "C" const lv_font_t font_weight_112;
 
 namespace ui {
 namespace {
+
+// The layout was designed at 480x480; S() scales a length to this board's screen.
+constexpr int S(int px) { return (px * BOARD_SCREEN_PX + 240) / 480; }
+#if BOARD_SCREEN_PX >= 480
+const lv_font_t &FONT_WEIGHT = font_weight_150;
+const lv_font_t &FONT_UNIT = lv_font_montserrat_28;
+const lv_font_t &FONT_STATE = lv_font_montserrat_20;
+const lv_font_t &FONT_REPS = lv_font_montserrat_22;
+const lv_font_t &FONT_BLE = lv_font_montserrat_24;
+const lv_font_t &FONT_BATTERY = lv_font_montserrat_20;
+#else
+const lv_font_t &FONT_WEIGHT = font_weight_112;
+const lv_font_t &FONT_UNIT = lv_font_montserrat_22;
+const lv_font_t &FONT_STATE = lv_font_montserrat_16;
+const lv_font_t &FONT_REPS = lv_font_montserrat_18;
+const lv_font_t &FONT_BLE = lv_font_montserrat_18;
+const lv_font_t &FONT_BATTERY = lv_font_montserrat_16;
+#endif
 
 // Palette
 constexpr uint32_t BG_TOP = 0x0B1020;
@@ -96,7 +116,7 @@ void begin() {
 
   // Tick ring: 40 minor ticks over the 270 degree sweep, a major tick every 5 (every 25 lb).
   scale = lv_scale_create(scr);
-  lv_obj_set_size(scale, 440, 440);
+  lv_obj_set_size(scale, S(440), S(440));
   lv_obj_center(scale);
   lv_scale_set_mode(scale, LV_SCALE_MODE_ROUND_INNER);
   lv_scale_set_range(scale, 0, 40);
@@ -110,57 +130,57 @@ void begin() {
   lv_obj_set_style_arc_width(scale, 0, LV_PART_MAIN);
   lv_obj_set_style_line_color(scale, lv_color_hex(TICK), LV_PART_ITEMS);
   lv_obj_set_style_line_width(scale, 2, LV_PART_ITEMS);
-  lv_obj_set_style_length(scale, 8, LV_PART_ITEMS);
+  lv_obj_set_style_length(scale, S(8), LV_PART_ITEMS);
   lv_obj_set_style_line_color(scale, lv_color_hex(TICK_MAJOR), LV_PART_INDICATOR);
   lv_obj_set_style_line_width(scale, 3, LV_PART_INDICATOR);
-  lv_obj_set_style_length(scale, 14, LV_PART_INDICATOR);
+  lv_obj_set_style_length(scale, S(14), LV_PART_INDICATOR);
   lv_obj_remove_flag(scale, LV_OBJ_FLAG_CLICKABLE);
 
   // Soft glow behind the weight arc, then the arc itself.
-  glowArc = makeArc(476, 30, GREY);
+  glowArc = makeArc(S(476), S(30), GREY);
   lv_obj_set_style_arc_opa(glowArc, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_arc_opa(glowArc, LV_OPA_30, LV_PART_INDICATOR);
   lv_arc_set_range(glowArc, 5, 200);
-  weightArc = makeArc(476, 14, GREY);
+  weightArc = makeArc(S(476), S(14), GREY);
   lv_arc_set_range(weightArc, 5, 200);
   lv_arc_set_value(weightArc, 5);
   lv_arc_set_value(glowArc, 5);
 
   // Hold-to-load ring inside the tick ring.
-  holdArc = makeArc(380, 8, RED);
+  holdArc = makeArc(S(380), S(8), RED);
   lv_obj_set_style_arc_opa(holdArc, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_arc_set_range(holdArc, 0, 100);
   lv_arc_set_value(holdArc, 0);
 
-  weightLabel = makeLabel(&font_weight_150, 0xFFFFFF);
-  lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -26);
-  unitLabel = makeLabel(&lv_font_montserrat_28, TEXT_DIM);
+  weightLabel = makeLabel(&FONT_WEIGHT, 0xFFFFFF);
+  lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -S(26));
+  unitLabel = makeLabel(&FONT_UNIT, TEXT_DIM);
   lv_label_set_text(unitLabel, "lb");
-  lv_obj_align(unitLabel, LV_ALIGN_CENTER, 0, 64);
+  lv_obj_align(unitLabel, LV_ALIGN_CENTER, 0, S(64));
 
   statePill = lv_obj_create(scr);
-  lv_obj_set_size(statePill, 190, 40);
-  lv_obj_align(statePill, LV_ALIGN_BOTTOM_MID, 0, -92);
-  lv_obj_set_style_radius(statePill, 20, 0);
+  lv_obj_set_size(statePill, S(190), S(40));
+  lv_obj_align(statePill, LV_ALIGN_BOTTOM_MID, 0, -S(92));
+  lv_obj_set_style_radius(statePill, S(20), 0);
   lv_obj_set_style_border_width(statePill, 0, 0);
   lv_obj_set_style_bg_color(statePill, lv_color_hex(TRACK), 0);
   lv_obj_set_style_pad_all(statePill, 0, 0);
   lv_obj_remove_flag(statePill, LV_OBJ_FLAG_SCROLLABLE);
   stateLabel = lv_label_create(statePill);
-  lv_obj_set_style_text_font(stateLabel, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(stateLabel, &FONT_STATE, 0);
   lv_obj_set_style_text_color(stateLabel, lv_color_white(), 0);
   lv_obj_set_style_text_letter_space(stateLabel, 2, 0);
   lv_label_set_text(stateLabel, "");
   lv_obj_center(stateLabel);
 
-  repsLabel = makeLabel(&lv_font_montserrat_22, TEXT_DIM);
-  lv_obj_align(repsLabel, LV_ALIGN_BOTTOM_MID, 0, -58);
+  repsLabel = makeLabel(&FONT_REPS, TEXT_DIM);
+  lv_obj_align(repsLabel, LV_ALIGN_BOTTOM_MID, 0, -S(58));
 
-  bleLabel = makeLabel(&lv_font_montserrat_24, GREY);
+  bleLabel = makeLabel(&FONT_BLE, GREY);
   lv_label_set_text(bleLabel, LV_SYMBOL_BLUETOOTH);
-  lv_obj_align(bleLabel, LV_ALIGN_TOP_MID, -34, 72);
-  batteryLabel = makeLabel(&lv_font_montserrat_20, TEXT_DIM);
-  lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, 22, 76);
+  lv_obj_align(bleLabel, LV_ALIGN_TOP_MID, -S(34), S(72));
+  batteryLabel = makeLabel(&FONT_BATTERY, TEXT_DIM);
+  lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, S(22), S(76));
 }
 
 namespace {
@@ -203,7 +223,7 @@ void render(const ViewModel& vm) {
     if (isFirst) { ringShown = vm.weight; lv_arc_set_value(weightArc, vm.weight); lv_arc_set_value(glowArc, vm.weight); }
     animatedWeight = vm.weight;
     lv_label_set_text_fmt(weightLabel, "%d", vm.weight);
-    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -26);
+    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -S(26));
   }
 
   // Style writes invalidate the whole object, so apply them only on actual change.
@@ -248,13 +268,13 @@ void render(const ViewModel& vm) {
   if (isFirst || vm.loaded != prev.loaded || vm.reps != prev.reps) {
     if (vm.loaded) lv_label_set_text_fmt(repsLabel, "%d reps", vm.reps);
     else lv_label_set_text(repsLabel, "");
-    lv_obj_align(repsLabel, LV_ALIGN_BOTTOM_MID, 0, -58);
+    lv_obj_align(repsLabel, LV_ALIGN_BOTTOM_MID, 0, -S(58));
   }
 
   if (isFirst || vm.battery != prev.battery) {
     if (vm.battery >= 0) lv_label_set_text_fmt(batteryLabel, "%s %d%%", batterySymbol(vm.battery), vm.battery);
     else lv_label_set_text(batteryLabel, "");
-    lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, 22, 76);
+    lv_obj_align(batteryLabel, LV_ALIGN_TOP_MID, S(22), S(76));
   }
 }
 

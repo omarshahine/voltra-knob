@@ -46,6 +46,9 @@ enum class ButtonAction { None, Tap, HoldComplete, HoldCancelled };
 class ButtonClassifier {
  public:
   ButtonAction onLevel(bool pressed, uint32_t now);
+  // The button level could not be read (for example an I2C error on a touch controller). Drops
+  // the gesture in progress: nothing fires until a released level has been seen again.
+  void cancel(uint32_t now);
   float holdProgress(uint32_t now) const;
   bool isPressed() const { return pressed_; }
 
@@ -53,8 +56,19 @@ class ButtonClassifier {
   bool pressed_ = false;
   bool holdFired_ = false;
   bool haveEdge_ = false;
+  bool cancelled_ = false;
   uint32_t pressMs_ = 0;
   uint32_t lastEdgeMs_ = 0;
+};
+
+// One channel of a "bidirectional switch" knob (Waveshare): fires once per rising edge that
+// follows at least DEBOUNCE consecutive low samples. The counter saturates, so a contact held
+// closed for any length of time still produces its step on release.
+struct PulseChannel {
+  static constexpr uint8_t DEBOUNCE = 2;
+  uint8_t prev = 1;
+  uint8_t lowCount = 0;
+  bool sample(uint8_t level);
 };
 
 enum class LoadCommand { None, Load, Unload, ArmAutoLoad };

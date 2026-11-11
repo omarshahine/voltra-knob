@@ -123,6 +123,48 @@ static void testButtonBounce() {
   CHECK(b.onLevel(false, 200) == ButtonAction::Tap);
 }
 
+static void testButtonCancelDuringHold() {
+  // A read error 200 ms into a hold must not turn the release into a tap (which would load).
+  ButtonClassifier b;
+  b.onLevel(true, 0);
+  b.cancel(200);
+  CHECK(!b.isPressed());
+  CHECK(b.holdProgress(300) == 0.f);
+  CHECK(b.onLevel(true, 250) == ButtonAction::None);       // finger still down after recovery
+  CHECK(b.onLevel(true, 900) == ButtonAction::None);       // no hold fires either
+  CHECK(b.onLevel(false, 950) == ButtonAction::None);      // release clears the cancel silently
+  CHECK(b.onLevel(true, 1100) == ButtonAction::None);      // next gesture works normally
+  CHECK(b.onLevel(false, 1200) == ButtonAction::Tap);
+}
+
+static void testButtonCancelWhileIdle() {
+  ButtonClassifier b;
+  b.cancel(0);                                             // error with no gesture: no effect
+  CHECK(b.onLevel(true, 100) == ButtonAction::None);
+  CHECK(b.onLevel(false, 200) == ButtonAction::Tap);
+}
+
+static int pulses(PulseChannel &ch, uint8_t level, int samples) {
+  int n = 0;
+  for (int i = 0; i < samples; ++i) n += ch.sample(level) ? 1 : 0;
+  return n;
+}
+
+static void testPulseChannel() {
+  PulseChannel ch;
+  CHECK(pulses(ch, 1, 5) == 0);
+  CHECK(pulses(ch, 0, 2) == 0);
+  CHECK(pulses(ch, 1, 1) == 1);                            // two lows then high: one step
+  CHECK(pulses(ch, 1, 5) == 0);
+  CHECK(pulses(ch, 0, 1) == 0);
+  CHECK(pulses(ch, 1, 1) == 0);                            // a one-sample glitch is ignored
+  static const int lens[] = {255, 256, 257, 300, 1000};
+  for (int len : lens) {           // long holds used to wrap an 8-bit counter
+    CHECK(pulses(ch, 0, len) == 0);
+    CHECK(pulses(ch, 1, 1) == 1);
+  }
+}
+
 static void testDecideLoad() {
   CHECK(decideLoad(ButtonAction::Tap, true, true) == LoadCommand::Unload);
   CHECK(decideLoad(ButtonAction::Tap, true, false, true) == LoadCommand::Unload);      // cancel armed
@@ -139,5 +181,5 @@ static void testDecideLoad() {
 MINITEST_MAIN({
   testDialBasics(); testDialClamp(); testDialBurst(); testDialBurstDown(); testDialTimeoutReverts();
   testDialLoadedCap(); testDialConfirmedWhileIdleFollowsDevice();
-  testButtonTap(); testButtonHold(); testButtonHoldCancelled(); testButtonBounce(); testDecideLoad();
+  testButtonTap(); testButtonHold(); testButtonHoldCancelled(); testButtonBounce(); testButtonCancelDuringHold(); testButtonCancelWhileIdle(); testPulseChannel(); testDecideLoad();
 })

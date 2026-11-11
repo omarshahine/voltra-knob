@@ -1,3 +1,5 @@
+#include "board_config.h"
+#if !VOLTRA_BOARD_WAVESHARE_KNOB18
 #include "board.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -169,9 +171,11 @@ bool pollRotate(RotateEvent& out) {
   return rotateQueue && xQueueReceive(rotateQueue, &out, 0) == pdTRUE;
 }
 
-bool buttonPressed() {
-  return pcf8574.digitalRead(P5, true) == LOW;
+ButtonRead readButton() {
+  return pcf8574.digitalRead(P5, true) == LOW ? ButtonRead::Pressed : ButtonRead::Released;
 }
+
+bool buttonPressed() { return readButton() == ButtonRead::Pressed; }
 
 void dumpEncoderPins() {
   Serial.printf("[gpio] uptime=%lu ms\n", (unsigned long)millis());
@@ -197,4 +201,8 @@ void setBacklight(uint8_t level) {
   ledcWrite(SCREEN_BACKLIGHT_PIN, level);
 }
 
+void haptic(Haptic) {}   // no haptic motor on this board
+
 }  // namespace board
+
+#endif  // !VOLTRA_BOARD_WAVESHARE_KNOB18
