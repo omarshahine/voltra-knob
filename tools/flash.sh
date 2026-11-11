@@ -9,6 +9,7 @@ if [ -z "$PORT" ]; then
   if [ "$BOARD" = waveshare ]; then
     echo "The Waveshare knob has a USB switch: if only a /dev/cu.usbserial-* (CH340) port shows up," >&2
     echo "you are talking to its secondary ESP32. Flip the USB-C plug over to reach the ESP32-S3." >&2
+    echo "If no port shows up at all, approve the macOS \"Allow accessory to connect?\" prompt." >&2
   fi
   exit 1
 fi
